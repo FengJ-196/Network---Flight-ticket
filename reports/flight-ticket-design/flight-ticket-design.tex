@@ -59,7 +59,7 @@
 \lead{Customer goal}
 \begin{points}
 \item Search several airlines and compare price and flight duration.
-\item Reserve seats, pay, receive ticket codes and manage bookings.
+\item Book flights, pay from balance, receive ticket codes and manage bookings.
 \item Receive flight updates even after reconnecting.
 \end{points}
 \column{0.47\textwidth}
@@ -87,7 +87,7 @@ R2 Logging & Server records received and sent messages & 1\\
 R3 Accounts & Register, authenticate and log out & 2\\
 R4 Search & Route, departure/return date, passengers and seat class & 2\\
 R5 Compare & Airline prices and flight duration & 2\\
-R6 Purchase & Hold seats, check balance, pay and issue tickets & 3\\
+R6 Purchase & Book flight, check balance, pay and issue tickets & 3\\
 R7 E-ticket & Send ticket codes through real email & 2\\
 R8 Management & View, cancel, change and print tickets & 3\\
 R9 Notifications & Admin triggers schedule, cancellation and delay updates & 3\\
@@ -107,7 +107,7 @@ R9 Notifications & Admin triggers schedule, cancellation and delay updates & 3\\
 \node[box,text width=3.5cm] (db) at (10,0) {\textbf{Durable SQL store}\\Seats, bookings, ledger\\Inbox and email jobs};
 \draw[arr,<->] (client) -- node[event,above]{TCP\\9090} (server);
 \draw[arr,<->] (server) -- node[event,above]{SQL} (db);
-\node[box,text width=3.5cm] (worker) at (5,-2.4) {\textbf{Background worker}\\Hold expiry and email};
+\node[box,text width=3.5cm] (worker) at (5,-2.4) {\textbf{Background worker}\\Email delivery and retries};
 \node[box,text width=3.5cm] (email) at (10,-2.4) {\textbf{Real email provider}\\Recipient mailbox};
 \draw[arr,<->] (worker.north east) -- (db.south west);
 \draw[arr] (worker) -- (email);
@@ -125,7 +125,7 @@ R9 Notifications & Admin triggers schedule, cancellation and delay updates & 3\\
 \textbf{Actor} & \textbf{Procedure} & \textbf{Client/server responsibility}\\
 \midrule
 Guest & Register, then log in & Server creates USER and binds identity to the connection\\
-Customer & Search, compare, book, pay & Client selects flights. Server prices, holds and debits\\
+Customer & Search, compare, book, pay & Client selects flights. Server checks balance, debits and issues tickets\\
 Customer & Receive email and manage tickets & Server returns current booking/ticket data. Client prints locally\\
 Customer & Review flight notifications & Client handles pushes and retrieves unread inbox entries\\
 Admin & List flights, delay, reschedule, cancel & Server checks ADMIN, updates affected bookings and saves notifications\\
@@ -156,7 +156,7 @@ F1001 / VN213 & Vietnam Airlines & 1,850,000 & 130 min\\
 \item Exclude unavailable flights or insufficient seats. Search and comparison hold no seats.
 \end{points}
 \end{frame}
-\note{Use the fixed mocked fixtures. The table shows an illustrative subset, not the full search response. For one passenger F1003 costs 300,000 more than F1002 and saves five minutes. Prices multiply by passenger count. A later booking must check seats again because search does not reserve inventory.}
+\note{Use the fixed mocked fixtures. The table shows an illustrative subset, not the full search response. For one passenger F1003 costs 300,000 more than F1002 and saves five minutes. Prices multiply by passenger count. Payment checks balance and seats because neither search nor booking holds inventory.}
 
 % MAIN 07 | 1:30 | Sources: message-spec.md sections 1-2
 \begin{frame}[fragile]{TCP framing and transport rules}
@@ -251,21 +251,19 @@ Admin & \msg{ADMIN_LIST_FLIGHTS}, \msg{ADMIN_UPDATE_FLIGHT}\\
 \begin{frame}{Booking state machine}
 \centering
 \begin{tikzpicture}
-\node[box,text width=3.5cm] (pending) at (0,0) {PENDING\_PAYMENT\\10-minute seat hold};
-\node[box,text width=2.4cm] (ticketed) at (5.0,0) {TICKETED\\Paid, valid tickets};
-\node[box] (expired) at (0,-2.0) {EXPIRED};
-\node[box] (cancelled) at (5,-2.0) {CANCELLED};
-\node[box,text width=3.5cm] (fcancelled) at (10,-2.0) {FLIGHT\_CANCELLED};
-\draw[arr] (pending) -- node[event,above]{PAY} (ticketed);
-\draw[arr] (pending) -- node[event,left]{expiry} (expired);
-\draw[arr] (pending) -- node[event,below,sloped,pos=0.35]{cancel/update} (cancelled);
-\draw[arr] (ticketed) -- node[event,right]{cancel} (cancelled);
-\draw[arr] (ticketed) -- node[event,above,sloped]{admin cancel} (fcancelled);
+\node[box,text width=3.4cm] (pending) at (0,0) {PENDING\_PAYMENT\\No seat hold};
+\node[box,text width=3.2cm] (ticketed) at (6.0,0) {TICKETED\\Paid, valid tickets};
+\node[box,text width=2.4cm] (cancelled) at (0,-2.2) {CANCELLED};
+\node[box,text width=3.6cm] (fcancelled) at (6.0,-2.2) {FLIGHT\_CANCELLED};
+\draw[arr] (pending) -- node[event,above]{PAY (balance \& seats ok)} (ticketed);
+\draw[arr] (pending) -- node[event,left]{cancel / abandon} (cancelled);
+\draw[arr] (ticketed) -- node[event,above,sloped,pos=0.4]{cancel ($\ge$ 2 h)} (cancelled);
+\draw[arr] (ticketed) -- node[event,right]{admin cancel} (fcancelled);
 \end{tikzpicture}
 \par\gap\raggedright\small
-\textbf{CHANGE\_BOOKING} keeps TICKETED and increments revision. Terminal bookings remain viewable, but their tickets are invalid for print/resend.
+\textbf{No seat hold:} Booking creates \msg{PENDING_PAYMENT}. Payment checks balance and seats: deducts balance and issues tickets on success, or returns an error on failure.
 \end{frame}
-\note{A booking begins at BOOK_FLIGHT with held seats. PAY converts held seats to sold seats. Expiry or unpaid cancellation releases all holds. A paid customer cancellation follows the confirmed simple refund rules. Admin flight cancellation refunds the outstanding net amount paid once. Booking revisions make old print data detectable.}
+\note{Booking begins with BOOK_FLIGHT in PENDING_PAYMENT without holding seats. When the customer pays, the server checks balance and seat availability together. On success, it deducts balance, allocates seats, issues tickets and transitions to TICKETED. On insufficient balance or sold-out seats, an error is returned with zero deduction. Customer cancellation of paid bookings follows the simple refund rules. Admin cancellation refunds the net amount paid.}
 
 % MAIN 12 | 2:00 | Sources: use-case-flows.md UC05-06; processing-tables.md
 \begin{frame}{Booking and payment message sequence}
@@ -276,16 +274,16 @@ Admin & \msg{ADMIN_LIST_FLIGHTS}, \msg{ADMIN_UPDATE_FLIGHT}\\
 \node at (11.0,0.1) {\textbf{SQL store}};
 \foreach \x in {0,6,11} \draw[dashed,gray] (\x,-0.3)--(\x,-4.5);
 \draw[arr] (0,-0.6)--node[event,above]{BOOK\_FLIGHT(selection, passengers, contactEmail, key)}(6,-0.6);
-\draw[arr] (6,-1.2)--node[event,above]{reserve all legs atomically}(11,-1.2);
-\draw[arr] (6,-1.8)--node[event,above]{bookingCode, total, holdExpiresAt}(0,-1.8);
+\draw[arr] (6,-1.2)--node[event,above]{create booking (no seat hold)}(11,-1.2);
+\draw[arr] (6,-1.8)--node[event,above]{bookingCode, total}(0,-1.8);
 \draw[arr] (0,-2.4)--node[event,above]{PAY\_BOOKING(bookingCode, method, key)}(6,-2.4);
-\draw[arr] (6,-3.1)--node[event,above]{debit + sold seats + tickets + email job}(11,-3.1);
+\draw[arr] (6,-3.1)--node[event,above]{check balance \& seats $\rightarrow$ debit + seats + tickets}(11,-3.1);
 \draw[arr] (6,-3.8)--node[event,above]{TICKETED, paid, balanceAfter, delivery QUEUED}(0,-3.8);
 \end{tikzpicture}
 \par\raggedright\small
-Insufficient balance preserves the live hold. An expired hold returns \msg{E_HOLD_EXPIRED}. No partial purchase or double debit.
+\textbf{Payment flow:} User clicks book $\rightarrow$ user clicks pay $\rightarrow$ server checks user balance and seat availability $\rightarrow$ deducts balance and creates tickets, or shows error if balance is insufficient (no deduction).
 \end{frame}
-\note{Use the illustrative one-passenger F1003 purchase: starting balance 5,000,000 VND, fare 1,590,000 and remaining balance 3,410,000. The server computes amounts. Credit card and e-wallet are method labels, while the selected implementation debits balance. Both booking legs succeed together. Payment stores its success result and queued email job in the same transaction.}
+\note{The simplified booking flow eliminates seat holding. BOOK_FLIGHT creates an unpaid booking record with the total fare. Next, the user clicks pay: PAY_BOOKING triggers the server to check user balance and seat availability. If balance covers the fare and seats are free, the server atomically deducts balance, secures seats, generates tickets, and queues the email. If balance is insufficient, the server returns E_INSUFFICIENT_BALANCE with zero deduction.}
 
 % MAIN 13 | 1:15 | Sources: business-flow.md BR26; processing-tables.md delivery
 \begin{frame}{Real e-ticket email delivery}
@@ -319,7 +317,7 @@ Customer resends & \msg{RESEND_TICKET(bookingCode)} uses the same saved recipien
 Paid, at least 2 h before departure & Allow cancellation. Refund 100\% of current fare\\
 Paid, less than 2 h, not disrupted & Reject with \msg{E_CANCEL_NOT_ALLOWED}\\
 Disrupted paid booking, before departure & Refund 100\% of current fare, even within 2 h\\
-Live PENDING\_PAYMENT & Release all holds. Refund zero\\
+Unpaid PENDING\_PAYMENT & Cancel booking. Refund zero (no charge, no seats held)\\
 \bottomrule
 \end{tabularx}
 \begin{points}
@@ -364,7 +362,7 @@ Change requires every current leg and replacement to depart at least 2 h later. 
 \draw[arr] (11,-3.5)--node[event,above]{GET / ACK\_NOTIFICATIONS}(5.8,-3.5);
 \end{tikzpicture}
 \par\raggedright\small
-DELAY/RESCHEDULE updates paid itineraries and invalidates unpaid holds. CANCEL releases all affected booking legs and refunds paid bookings once. Offline customers recover from the saved inbox.
+DELAY/RESCHEDULE updates paid itineraries and notifies customers. CANCEL cancels affected flights, releases seats, and refunds paid bookings once. Offline customers recover from the saved inbox.
 \end{frame}
 \note{Admins list flights before updating. DELAY adds minutes, RESCHEDULE supplies absolute times and CANCEL cancels the flight. expectedVersion rejects an update based on stale flight data. Each affected ticketed booking receives a saved notification. Live push is best effort. ACK marks a notification read, while successful socket write does not.}
 
@@ -439,217 +437,9 @@ Idempotency key & Identifies a committed operation across reconnect/restart\\
 \end{frame}
 \note{The key scope is user, operation type and key. The server stores normalized payload and result in the mutation transaction. Same key with another payload yields E_IDEMPOTENCY_CONFLICT. BOOK, PAY, CANCEL, CHANGE and ADMIN_UPDATE use durable keys. Read-only calls can simply repeat. This guarantee does not promise exactly-once email delivery.}
 
-% MAIN 20 | 1:15 | Sources: README.md validation; acceptance-scenarios.md; lecture pp21-24
-\begin{frame}{Validation and implementation acceptance}
-\small
-\begin{columns}[T]
-\column{0.48\textwidth}
-\lead{Current design evidence}
-\begin{points}
-\item 92 synthetic frames cover all 19 request types.
-\item Validator checks correlation, payloads, replay and money arithmetic.
-\item 40 acceptance scenarios define future observable results.
-\end{points}
-\column{0.48\textwidth}
-\lead{Required runtime evidence}
-\begin{points}
-\item Client on PC B communicates with server on PC A.
-\item Real email arrives with matching codes.
-\item Logs, last-seat races, lost replies and offline notifications behave correctly.
-\end{points}
-\end{columns}
-\gap
-\textbf{Next decisions:} allowed server language, SQL engine and email provider. Implement, execute acceptance scenarios and record results for the later final report.
-\gap
-\hyperlink{closing}{\lead{Questions}}
-\end{frame}
-\note{Do not claim the structural validator runs the application. No client/server implementation or two-PC demo was found in the reviewed package. Our current deliverable is the protocol design. The later final report must evaluate the actual application. Confirm remaining proposed hold/change rules with the professor. Click Questions to jump to the final thank-you slide, skipping the optional appendix.}
-
-\appendix
-\showPageNumber
-\setbeamertemplate{background canvas}{\includegraphics[width=\paperwidth,height=\paperheight]{hust-blue-169-content-hust-full.png}}
-\setbeamertemplate{background}{\drawHustPageNum}
-
-% APPENDIX A | Sources: message-spec.md; processing-tables.md
-\begin{frame}{Appendix: account, search and comparison processing}
-\footnotesize
-\begin{tabularx}{\textwidth}{@{}lYYY@{}}
-\toprule
-\textbf{Operation} & \textbf{Client sends} & \textbf{Server checks/actions} & \textbf{Client result}\\
-\midrule
-PING & Empty data & Read server time & Clock/liveness result\\
-REGISTER & Username, password, name, email & Validate, hash password, enforce uniqueness, create USER & Show account result, then offer login\\
-LOGIN / LOGOUT & Credentials / empty data & Bind stored identity / flush logout and close & Show role / return to disconnected\\
-GET\_BALANCE & Empty data & Read authenticated user's balance & Display authoritative VND balance\\
-SEARCH\_FLIGHTS & Route, dates, class, count, sorting & Check dates and eligibility, release stale holds, price/filter & Display offers or successful empty list\\
-COMPARE\_FLIGHTS & Flight IDs, class, count & Same route/date, live seats, calculate deltas & Show cheapest/fastest and differences\\
-\bottomrule
-\end{tabularx}
-\end{frame}
-\note{Backup for UC01 to UC04 and balance. All operations enforce session roles. Unknown fields and incompatible input types return E_VALIDATION. Search/compare neither reserve seats nor move money.}
-
-% APPENDIX B | Sources: message-spec.md; processing-tables.md
-\begin{frame}{Appendix: purchase and email processing}
-\footnotesize
-\begin{tabularx}{\textwidth}{@{}lYYY@{}}
-\toprule
-\textbf{Operation} & \textbf{Input} & \textbf{Server processing} & \textbf{Result / important errors}\\
-\midrule
-BOOK\_FLIGHT & Selected legs, class, passengers, contactEmail, key & Replay, route/order, inventory. Hold all legs or none & PNR, revision, fare, expiry. Seat/unavailable errors\\
-PAY\_BOOKING & PNR, method, key & Replay, owner, live hold, flight status, balance. Debit/issue atomically & TICKETED, codes, balance, QUEUED email. Hold/balance errors\\
-RESEND\_TICKET & PNR only & Own TICKETED booking. Queue real email to saved contact & EMAIL, masked recipient, status. State/ownership errors\\
-\bottomrule
-\end{tabularx}
-\gap
-\small
-Client retains mutation keys across timeouts. Email failure never reverses a committed payment. A resend does not charge or issue another ticket.
-\end{frame}
-\note{Backup for UC05 to UC07. A return trip must reverse the route and depart after outbound arrival. The contract uses one ticket number per passenger for all current booking legs. This is a proposed course simplification.}
-
-% APPENDIX C | Sources: use-case-flows.md UC08-11; message-spec.md
-\begin{frame}{Appendix: ticket-management processing}
-\footnotesize
-\begin{tabularx}{\textwidth}{@{}lYYY@{}}
-\toprule
-\textbf{Operation} & \textbf{Client procedure} & \textbf{Server processing} & \textbf{Observable outcome}\\
-\midrule
-LIST / GET\_BOOKING & Page own bookings, open PNR & Owner/filter/snapshot checks & Current detail, terminal history still viewable\\
-CANCEL\_BOOKING & Optional preview, then code/key & Replay, owner, live state, simple cutoff/disruption rule & Release all legs. Full fare or zero unpaid refund\\
-CHANGE\_BOOKING & Select leg/replacement, quote, accept/apply & Owner, quote/revisions, route, time, seats, balance & Atomic swap and signed settlement, revised email\\
-PRINT\_TICKET & Request text, choose local print/save & Own TICKETED booking, bounded current text & Client prints current revision\\
-\bottomrule
-\end{tabularx}
-\gap
-\small
-Terminal records reject active-ticket operations. Another user's booking appears as E\_NOT\_FOUND. Local print cancellation has no server effect.
-\end{frame}
-\note{Backup for UC08 to UC11. Cancellation preview is advisory. Change quotes expire at 60 seconds and do not hold replacement seats. Apply never silently substitutes a new change amount.}
-
-% APPENDIX D | Sources: use-case-flows.md UC12-14; message-spec.md
-\begin{frame}{Appendix: admin and notification processing}
-\footnotesize
-\begin{tabularx}{\textwidth}{@{}lYY@{}}
-\toprule
-\textbf{Operation} & \textbf{Server behavior} & \textbf{Client behavior}\\
-\midrule
-ADMIN\_LIST\_FLIGHTS & ADMIN only. Filter/page current flight versions & Select flight and retain version\\
-ADMIN\_UPDATE\_FLIGHT & Replay, active flight, expectedVersion, action fields. Commit all effects & Show saved counts, refresh affected data\\
-NOTIFY & Save inbox entry, then push to online customer sockets & Deduplicate notificationId, show update, refresh booking\\
-GET\_NOTIFICATIONS & Return own complete entries with read flag, bounded pages & Recover unread updates after login\\
-ACK\_NOTIFICATION & Check all IDs owned, then mark read atomically & Update read state. Repeated ACK is safe\\
-\bottomrule
-\end{tabularx}
-\gap
-\small
-DELAY needs delayMinutes. RESCHEDULE needs new departure/arrival. CANCEL needs neither. Unknown action fields are rejected.
-\end{frame}
-\note{Backup for UC12 to UC14. A push count describes selected connections, not acknowledged delivery or reading. If the server crashes after commit but before push, customers recover the saved notification through GET_NOTIFICATIONS. Admin-key replay must not apply another delay or another refund.}
-
-% APPENDIX E | Sources: wire-examples.jsonl #52-53; message-spec.md
-\begin{frame}[fragile]{Appendix: complete cancellation exchange}
-\small
-\lead{Apply directly, without a quote}
-\begin{lstlisting}
-{"v":1,"type":"CANCEL_BOOKING","id":"c-022",
- "data":{"bookingCode":"X4K9PL","dryRun":false,
- "idempotencyKey":"idem-cancel-1"}}
-\end{lstlisting}
-\lead{Refund the full current fare}
-\begin{lstlisting}
-{"v":1,"type":"CANCEL_BOOKING_RESP","id":"c-022",
- "ok":true,"code":"OK","data":{"dryRun":false,
- "bookingCode":"X4K9PL","status":"CANCELLED","fee":0,
- "feeReason":"INVOLUNTARY_CHANGE","refundAmount":1750000,
- "balanceAfter":4800000,"currency":"VND","revision":5}}
-\end{lstlisting}
-\gap
-Each displayed JSON object occupies one transmitted line, followed by LF. The source transcript uses a fixed synthetic clock.
-\end{frame}
-\note{This complete exchange comes from the current wire transcript. Balance had been 3,050,000 after a flight change, so the 1,750,000 current-fare refund gives 4,800,000. The prior 200,000 change fee remains separate. No cancellation deduction is applied.}
-
-% APPENDIX F | Sources: wire-examples.jsonl NOTIFY; message-spec.md
-\begin{frame}[fragile]{Appendix: full server push example}
-\begin{lstlisting}
-{"v":1,"type":"NOTIFY","id":null,"data":{
- "notificationId":"N-9001","kind":"DELAY",
- "bookingCode":"X4K9PL","flightId":"F1004","flightVersion":2,
- "flightNo":"VN215","oldDepartAt":"2026-12-20T14:00:00+07:00",
- "newDepartAt":"2026-12-20T16:30:00+07:00",
- "newArriveAt":"2026-12-20T18:40:00+07:00","delayMinutes":150,
- "freeCancellation":true,"message":"Flight delayed by 150 minutes",
- "createdAt":"2026-11-04T10:40:00+07:00"}}
-\end{lstlisting}
-\small
-\begin{points}
-\item A 150-minute net shift marks the booking disrupted.
-\item Push uses no request ID. Stored inbox entries add a read flag.
-\item The customer explicitly acknowledges notification IDs after reading.
-\end{points}
-\end{frame}
-\note{This is a complete synthetic illustration of the specified push schema. The notification ID is illustrative. Arrival remains later than departure. The original F1004 arrival was 16:10 and a 150-minute delay gives 18:40. Server push can arrive between a request and its reply.}
-
-% APPENDIX G | Sources: message-spec.md bounds; error-catalog.md
-\begin{frame}{Appendix: field bounds and important errors}
-\small
-\begin{tabularx}{\textwidth}{@{}lY@{}}
-\toprule
-\textbf{Field group} & \textbf{Contract}\\
-\midrule
-Money / time & Integer VND. ISO-8601 timestamps with +07:00 offset\\
-Passengers / class & 1--9 adults. ECONOMY, PREMIUM\_ECONOMY or BUSINESS\\
-Identifiers & PNR: six uppercase letters/digits. Request ID/key: 1--64 ASCII characters\\
-Collections & Compare 2--5 flights. List page 1--20 rows. ACK 1--50 unique IDs\\
-Validation & Reject duplicate JSON keys, non-finite numbers, unknown request fields and wrong types\\
-\bottomrule
-\end{tabularx}
-\gap
-\msg{E_NOT_FOUND}, \msg{E_STATE_CONFLICT}, \msg{E_HOLD_EXPIRED},
-\msg{E_CANCEL_NOT_ALLOWED}, \msg{E_QUOTE_EXPIRED},
-\msg{E_VERSION_CONFLICT}, \msg{E_IDEMPOTENCY_CONFLICT}.
-\end{frame}
-\note{Quote expiry applies only to changes. Version conflict also protects admin flight updates. The full error catalog defines safe context and recovery for 22 codes. The JSON catalog is a structural inventory, not a complete JSON Schema. Adult-only and list limits are proposed demo choices.}
-
-% APPENDIX H | Sources: state-machines.md flight lifecycle
-\begin{frame}{Appendix: flight states and admin effects}
-\small
-\begin{tabularx}{\textwidth}{@{}lYY@{}}
-\toprule
-\textbf{Trigger} & \textbf{Flight state} & \textbf{Booking effect}\\
-\midrule
-Initial schedule & SCHEDULED & Customers may hold eligible seats\\
-DELAY & DELAYED, version increments & Update paid itinerary and notify. Invalidate unpaid holds\\
-RESCHEDULE & RESCHEDULED, version increments & Same, with new absolute times\\
-CANCEL & CANCELLED, terminal & Cancel whole affected live bookings and release all legs\\
-Clock reaches departure & DEPARTED, derived & Reject new booking and post-departure cancellation/change\\
-\bottomrule
-\end{tabularx}
-\gap
-DELAY and RESCHEDULE may repeat on active future flights. A cancelled flight never becomes DEPARTED. Net shift from the accepted baseline determines disruption.
-\end{frame}
-\note{Disruption is a property of the ticketed booking's accepted itinerary. Corrections use net time movement, not accumulated absolute changes. A successful customer replacement resets the accepted baseline for that leg. Admin cancellation has a separate full-outstanding-payment refund rule, including prior change fees.}
-
-% APPENDIX I | Sources: original assignment and current package
-\begin{frame}{Appendix: source documents and review coverage}
-\small
-\begin{tabularx}{\textwidth}{@{}lY@{}}
-\toprule
-\textbf{Source} & \textbf{Used for}\\
-\midrule
-Docs/topic.md & R1--R9, balance payment, mocked flights, admin triggers and user clarifications\\
-Docs/Requirement.png & Introduction, architecture, functionality, protocol messages/states/processing\\
-Lecture PDF pp.10,12--14,21--24 & State/sequence/processing guidance, direct sockets, two PCs, design review and later evaluation\\
-Design-Review/*.md & Current rules, use cases, wire formats, states, handlers and planned acceptance scenarios\\
-message-catalog.json / wire-examples.jsonl & Operation inventory and synthetic examples\\
-\bottomrule
-\end{tabularx}
-\gap
-\textbf{Review coverage:} slides 2--3 introduction, 4 architecture, 5--6 functionality, 7--19 protocol design, 20 validation plan. Appendix tables cover all UC01--UC14.
-\end{frame}
-\note{The current confirmed user decisions override conflicting initial drafts: real email only and simple full-fare cancellation. The initial Docs drafts remain historical references. All slide claims about application behavior describe the design, not an implemented service.}
-
-% CLOSING 30 | 0:15 | Final slide after all appendix material
+% CLOSING | Final slide
 \setbeamertemplate{background canvas}{}
 \hidePageNumber
 \hustthankyou
-\note{Invite questions. This is the final page of the deck. Optional appendix slides 21--29 provide operation-level processing, full example messages, field bounds, flight states and sources. The main presentation reaches this page through the Questions link on slide 20.}
+\note{Invite questions. This concludes the presentation.}
 \end{document}
