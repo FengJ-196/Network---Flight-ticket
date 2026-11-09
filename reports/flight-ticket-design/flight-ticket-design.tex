@@ -59,7 +59,8 @@
 \lead{Customer goal}
 \begin{points}
 \item Search several airlines and compare price and flight duration.
-\item Book flights, pay from balance, receive ticket codes and manage bookings.
+\item Direct book and pay from balance, receive ticket codes.
+\item Manage bookings: cancel with 100\% refund, change, print.
 \item Receive flight updates even after reconnecting.
 \end{points}
 \column{0.47\textwidth}
@@ -87,9 +88,9 @@ R2 Logging & Server records received and sent messages & 1\\
 R3 Accounts & Register, authenticate and log out & 2\\
 R4 Search & Route, departure/return date, passengers and seat class & 2\\
 R5 Compare & Airline prices and flight duration & 2\\
-R6 Purchase & Book flight, check balance, pay and issue tickets & 3\\
+R6 Purchase & Direct book and pay: check balance and issue tickets & 3\\
 R7 E-ticket & Send ticket codes through real email & 2\\
-R8 Management & View, cancel, change and print tickets & 3\\
+R8 Management & View, cancel (with refund), change and print tickets & 3\\
 R9 Notifications & Admin triggers schedule, cancellation and delay updates & 3\\
 \bottomrule
 \end{tabularx}
@@ -125,8 +126,8 @@ R9 Notifications & Admin triggers schedule, cancellation and delay updates & 3\\
 \textbf{Actor} & \textbf{Procedure} & \textbf{Client/server responsibility}\\
 \midrule
 Guest & Register, then log in & Server creates USER and binds identity to the connection\\
-Customer & Search, compare, book, pay & Client selects flights. Server checks balance, debits and issues tickets\\
-Customer & Receive email and manage tickets & Server returns current booking/ticket data. Client prints locally\\
+Customer & Search, compare, book \& pay & Client submits selection. Server checks ticket status and balance, debits, issues tickets\\
+Customer & Manage tickets, cancel $\rightarrow$ refund & Server processes change/print; verifies $\ge$ 2 h cutoff, cancels tickets and refunds 100\% fare\\
 Customer & Review flight notifications & Client handles pushes and retrieves unread inbox entries\\
 Admin & List flights, delay, reschedule, cancel & Server checks ADMIN, updates affected bookings and saves notifications\\
 \bottomrule
@@ -212,14 +213,14 @@ One client request may wait at a time. Serialize complete outgoing frames.
 \midrule
 Session and account & \msg{PING}, \msg{REGISTER}, \msg{LOGIN}, \msg{LOGOUT}, \msg{GET_BALANCE}\\
 Search and comparison & \msg{SEARCH_FLIGHTS}, \msg{COMPARE_FLIGHTS}\\
-Booking and payment & \msg{BOOK_FLIGHT}, \msg{PAY_BOOKING}, \msg{RESEND_TICKET}\\
+Booking and payment & \msg{BOOK_AND_PAY}, \msg{RESEND_TICKET}\\
 Ticket management & \msg{LIST_BOOKINGS}, \msg{GET_BOOKING}, \msg{CANCEL_BOOKING}, \msg{CHANGE_BOOKING}, \msg{PRINT_TICKET}\\
 Notifications & \msg{GET_NOTIFICATIONS}, \msg{ACK_NOTIFICATION}\\
 Admin & \msg{ADMIN_LIST_FLIGHTS}, \msg{ADMIN_UPDATE_FLIGHT}\\
 \bottomrule
 \end{tabularx}
 \gap
-\textbf{19 request types}, typed responses and one unsolicited server message: \msg{NOTIFY}.
+\textbf{18 request types}, typed responses and one unsolicited server message: \msg{NOTIFY}.
 \end{frame}
 \note{Do not read every name aloud. Explain the grouped inventory and then focus on state, purchase and admin-notification flows. Each message has documented role, payload, success result and errors in the source specification. PING is allowed before login. Other business operations require the appropriate bound role.}
 
@@ -251,39 +252,43 @@ Admin & \msg{ADMIN_LIST_FLIGHTS}, \msg{ADMIN_UPDATE_FLIGHT}\\
 \begin{frame}{Booking state machine}
 \centering
 \begin{tikzpicture}
-\node[box,text width=3.4cm] (pending) at (0,0) {PENDING\_PAYMENT\\No seat hold};
-\node[box,text width=3.2cm] (ticketed) at (6.0,0) {TICKETED\\Paid, valid tickets};
-\node[box,text width=2.4cm] (cancelled) at (0,-2.2) {CANCELLED};
-\node[box,text width=3.6cm] (fcancelled) at (6.0,-2.2) {FLIGHT\_CANCELLED};
-\draw[arr] (pending) -- node[event,above]{PAY (balance \& seats ok)} (ticketed);
-\draw[arr] (pending) -- node[event,left]{cancel / abandon} (cancelled);
-\draw[arr] (ticketed) -- node[event,above,sloped,pos=0.4]{cancel ($\ge$ 2 h)} (cancelled);
-\draw[arr] (ticketed) -- node[event,right]{admin cancel} (fcancelled);
+\node[box,draw=gray,dashed,text width=2.4cm] (start) at (-3.4,0) {\textbf{User action:}\\Click Book \& Pay};
+\node[box,text width=3.4cm] (paid) at (2.2,0) {\textbf{PAID (TICKETED)}\\Active ticket, seats secured\\Fare deducted from balance};
+\node[box,text width=3.5cm] (cancelled) at (-1.0,-2.1) {\textbf{CANCELLED}\\Customer cancel ($\ge$ 2 h)\\\lead{100\% fare refunded}};
+\node[box,text width=3.9cm] (fcancelled) at (5.4,-2.1) {\textbf{FLIGHT\_CANCELLED}\\Admin cancels flight\\\lead{100\% fare refunded}};
+\draw[arr] (start) -- node[event,above]{check ticket status\\\& user balance} (paid);
+\draw[arr] (paid) -- node[event,above,sloped,pos=0.45]{cancel ($\ge$ 2 h) $\rightarrow$ refund} (cancelled);
+\draw[arr] (paid) -- node[event,above,sloped,pos=0.45]{admin cancel $\rightarrow$ refund} (fcancelled);
 \end{tikzpicture}
-\par\gap\raggedright\small
-\textbf{No seat hold:} Booking creates \msg{PENDING_PAYMENT}. Payment checks balance and seats: deducts balance and issues tickets on success, or returns an error on failure.
+\par\vspace{0.15cm}\raggedright\small
+\textbf{Single-step book and pay:} User clicks book and pay $\rightarrow$ server checks ticket status and user balance $\rightarrow$ deducts balance and creates \msg{PAID} booking. If checks fail, returns error (zero deduction).\\
+\textbf{Later cancellation $\rightarrow$ refund:} Customer cancel $\ge$ 2 h (or flight disruption/admin cancel) releases seats and refunds 100\% fare back to user account balance.
 \end{frame}
-\note{Booking begins with BOOK_FLIGHT in PENDING_PAYMENT without holding seats. When the customer pays, the server checks balance and seat availability together. On success, it deducts balance, allocates seats, issues tickets and transitions to TICKETED. On insufficient balance or sold-out seats, an error is returned with zero deduction. Customer cancellation of paid bookings follows the simple refund rules. Admin cancellation refunds the net amount paid.}
+\note{The booking lifecycle has no pending payment state. Booking and payment occur in a single step: the user clicks book and pay. The server checks ticket status (available seats) and user account balance. If valid, the server deducts the balance, allocates seats, and creates the booking directly in the PAID state. If checks fail, an error is returned without creating a booking. Later, if the customer cancels at least 2 hours before departure (or if the flight is disrupted or cancelled by admin), the server releases the seats and refunds 100\% of the fare back to the user's account balance.}
 
 % MAIN 12 | 2:00 | Sources: use-case-flows.md UC05-06; processing-tables.md
-\begin{frame}{Booking and payment message sequence}
+\begin{frame}{Booking, payment and cancellation sequence}
 \centering
 \begin{tikzpicture}[x=1cm,y=1cm]
 \node at (0,0.1) {\textbf{Customer client}};
 \node at (6.0,0.1) {\textbf{Server}};
 \node at (11.0,0.1) {\textbf{SQL store}};
-\foreach \x in {0,6,11} \draw[dashed,gray] (\x,-0.3)--(\x,-4.5);
-\draw[arr] (0,-0.6)--node[event,above]{BOOK\_FLIGHT(selection, passengers, contactEmail, key)}(6,-0.6);
-\draw[arr] (6,-1.2)--node[event,above]{create booking (no seat hold)}(11,-1.2);
-\draw[arr] (6,-1.8)--node[event,above]{bookingCode, total}(0,-1.8);
-\draw[arr] (0,-2.4)--node[event,above]{PAY\_BOOKING(bookingCode, method, key)}(6,-2.4);
-\draw[arr] (6,-3.1)--node[event,above]{check balance \& seats $\rightarrow$ debit + seats + tickets}(11,-3.1);
-\draw[arr] (6,-3.8)--node[event,above]{TICKETED, paid, balanceAfter, delivery QUEUED}(0,-3.8);
+\foreach \x in {0,6,11} \draw[dashed,gray] (\x,-0.2)--(\x,-4.2);
+
+\draw[arr] (0,-0.5)--node[event,above]{BOOK\_AND\_PAY(selection, passengers, email, key)}(6,-0.5);
+\draw[arr] (6,-1.0)--node[event,above]{check ticket status + check user balance}(11,-1.0);
+\draw[arr] (6,-1.5)--node[event,above]{atomic commit: debit balance + seats + issue tickets}(11,-1.5);
+\draw[arr] (6,-2.0)--node[event,above]{PAID, bookingCode, ticketCodes, balanceAfter, email QUEUED}(0,-2.0);
+
+\node[event,fill=blue!5,draw=hustprimary!40] at (5.5,-2.45) {\lead{Later: Customer cancellation ($\ge$ 2 h before departure)}};
+\draw[arr] (0,-2.9)--node[event,above]{CANCEL\_BOOKING(bookingCode, idempotencyKey)}(6,-2.9);
+\draw[arr] (6,-3.4)--node[event,above]{verify $\ge$ 2 h $\rightarrow$ release seats + refund 100\% fare to balance}(11,-3.4);
+\draw[arr] (6,-3.9)--node[event,above]{CANCELLED, refundAmount, balanceAfter}(0,-3.9);
 \end{tikzpicture}
 \par\raggedright\small
-\textbf{Payment flow:} User clicks book $\rightarrow$ user clicks pay $\rightarrow$ server checks user balance and seat availability $\rightarrow$ deducts balance and creates tickets, or shows error if balance is insufficient (no deduction).
+\textbf{Direct flow:} User clicks book and pay $\rightarrow$ server checks ticket status and user balance $\rightarrow$ deducts balance and creates \msg{PAID} ticket. Later cancellation ($\ge$ 2 h) refunds 100\% fare to user balance.
 \end{frame}
-\note{The simplified booking flow eliminates seat holding. BOOK_FLIGHT creates an unpaid booking record with the total fare. Next, the user clicks pay: PAY_BOOKING triggers the server to check user balance and seat availability. If balance covers the fare and seats are free, the server atomically deducts balance, secures seats, generates tickets, and queues the email. If balance is insufficient, the server returns E_INSUFFICIENT_BALANCE with zero deduction.}
+\note{The simplified booking process has no pending payment step. The customer sends BOOK_AND_PAY: the server checks ticket status and account balance. On success, it deducts balance, allocates seats, creates ticket codes, and queues the email in one atomic transaction. If balance is insufficient or seats are full, it returns an error with zero deduction. Later, if the customer cancels at least 2 hours before departure, CANCEL_BOOKING releases the seats and refunds 100\% of the fare directly to the user's account balance.}
 
 % MAIN 13 | 1:15 | Sources: business-flow.md BR26; processing-tables.md delivery
 \begin{frame}{Real e-ticket email delivery}
@@ -292,7 +297,7 @@ Admin & \msg{ADMIN_LIST_FLIGHTS}, \msg{ADMIN_UPDATE_FLIGHT}\\
 \toprule
 \textbf{Stage} & \textbf{Behavior}\\
 \midrule
-Payment commits & Booking is TICKETED. Store ticket codes and an email job\\
+Book \& pay commits & Booking is PAID. Store ticket codes and an email job\\
 Worker sends & Use the saved booking contactEmail and a configured real provider\\
 Delivery status & QUEUED, SENT on provider acceptance, or FAILED\\
 Provider fails & Keep the paid booking. Retry the email job without another charge\\
@@ -312,21 +317,21 @@ Customer resends & \msg{RESEND_TICKET(bookingCode)} uses the same saved recipien
 \small
 \begin{tabularx}{\textwidth}{@{}YY@{}}
 \toprule
-\textbf{Booking condition} & \textbf{Result}\\
+\textbf{Cancellation scenario} & \textbf{Refund and booking outcome}\\
 \midrule
-Paid, at least 2 h before departure & Allow cancellation. Refund 100\% of current fare\\
-Paid, less than 2 h, not disrupted & Reject with \msg{E_CANCEL_NOT_ALLOWED}\\
-Disrupted paid booking, before departure & Refund 100\% of current fare, even within 2 h\\
-Unpaid PENDING\_PAYMENT & Cancel booking. Refund zero (no charge, no seats held)\\
+Customer cancel $\ge$ 2 h before departure & Allow cancellation. \lead{Refund 100\% fare} to account balance\\
+Customer cancel $<$ 2 h (or departed) & Reject with \msg{E_CANCEL_NOT_ALLOWED}. Ticket remains active\\
+Disrupted flight (delayed $\ge$ 2 h / rescheduled) & Allow cancellation. \lead{Refund 100\% fare} to balance, even within 2 h\\
+Admin cancels flight & Automatic cancellation. \lead{Refund 100\% fare} to all affected bookings\\
 \bottomrule
 \end{tabularx}
-\begin{points}
-\item Send bookingCode and idempotencyKey. No cancellation quote is required.
-\item Optional preview changes nothing. Apply checks current eligibility again.
-\item Cancellation fee is zero. Already departed paid bookings cannot cancel.
+\gap
+\begin{points}\setlength{\itemsep}{3pt}
+\item \lead{100\% direct refund:} Eligible cancellations refund full fare directly to user account balance; cancellation fee is zero.
+\item \lead{Simple protocol:} Client sends \msg{CANCEL_BOOKING(bookingCode, idempotencyKey)}. Server verifies cutoff and processes refund atomically.
 \end{points}
 \end{frame}
-\note{This is the user's confirmed simplified policy. Exactly two hours is allowed. Existing disruption means a net departure shift of at least 120 minutes from the accepted baseline. Previously charged change fees remain separate from the current fare. Avoid expanding the talk into complex refund tiers or calculations.}
+\note{Since all bookings are paid directly at booking, every cancellation operates on an existing paid ticket. If the customer cancels at least 2 hours before departure, the server releases the seats and refunds 100\% of the fare directly to the user's account balance with zero fees. Cancellations within 2 hours are rejected unless the flight is disrupted (delay >= 120 minutes or rescheduled), which waives the cutoff and grants a full 100\% refund. Admin flight cancellation triggers an automatic 100\% refund to all booked customers. Departed flights cannot be cancelled.}
 
 % MAIN 15 | 1:00 | Sources: use-case-flows.md UC08,10,11; business-flow.md BR32
 \begin{frame}{Viewing, changing and printing tickets}
@@ -418,7 +423,7 @@ Oversize / incomplete-frame timeout & Bound memory, log the fault and close that
 % MAIN 19 | 1:15 | Sources: state-machines.md recovery; business-flow.md BR25
 \begin{frame}{Recovery after a lost reply}
 \small
-\textbf{Example:} payment commits, but the connection closes before the reply arrives.
+\textbf{Example:} book and pay commits, but the connection closes before the reply arrives.
 \gap
 \begin{enumerate}\setlength{\itemsep}{7pt}
 \item Client records an unknown outcome and keeps the original payload/key.
@@ -435,7 +440,7 @@ Idempotency key & Identifies a committed operation across reconnect/restart\\
 \bottomrule
 \end{tabularx}
 \end{frame}
-\note{The key scope is user, operation type and key. The server stores normalized payload and result in the mutation transaction. Same key with another payload yields E_IDEMPOTENCY_CONFLICT. BOOK, PAY, CANCEL, CHANGE and ADMIN_UPDATE use durable keys. Read-only calls can simply repeat. This guarantee does not promise exactly-once email delivery.}
+\note{The key scope is user, operation type and key. The server stores normalized payload and result in the mutation transaction. Same key with another payload yields E_IDEMPOTENCY_CONFLICT. BOOK_AND_PAY, CANCEL, CHANGE and ADMIN_UPDATE use durable keys. Read-only calls can simply repeat. This guarantee does not promise exactly-once email delivery.}
 
 % CLOSING | Final slide
 \setbeamertemplate{background canvas}{}

@@ -58,7 +58,7 @@ These are complete illustrative PING and login-failure frames. Error text is for
 
 Suggested time: 1:00. Sources: message-catalog.json; message-spec.md
 
-Do not read every name aloud. Explain the grouped inventory and then focus on state, purchase and admin-notification flows. Each message has documented role, payload, success result and errors in the source specification. PING is allowed before login. Other business operations require the appropriate bound role.
+Explain the grouped inventory: 18 request types. BOOK_AND_PAY combines booking and payment into a single direct operation. Focus on state, purchase, cancellation refund, and admin-notification flows. PING is allowed before login. Other business operations require the appropriate bound role.
 
 ### Slide 10: Session and client request states
 
@@ -70,25 +70,25 @@ This diagram highlights successful login and close paths. Any connected state al
 
 Suggested time: 1:30. Sources: state-machines.md booking lifecycle
 
-Booking begins with BOOK_FLIGHT in PENDING_PAYMENT without holding seats. When the customer pays, the server checks balance and seat availability together. On success, it deducts balance, allocates seats, issues tickets and transitions to TICKETED. On insufficient balance or sold-out seats, an error is returned with zero deduction. Customer cancellation of paid bookings follows the simple refund rules. Admin cancellation refunds the net amount paid.
+The booking lifecycle has no pending payment state. Booking and payment occur in a single step: user clicks book and pay. The server checks ticket status (available seats) and user account balance. If valid, the server deducts the balance, allocates seats, and creates the booking directly in the PAID state. If checks fail, an error is returned without creating a booking. Later, if the customer cancels at least 2 hours before departure (or if the flight is disrupted or cancelled by admin), the server releases the seats and refunds 100% of the fare back to the user's account balance.
 
-### Slide 12: Booking and payment message sequence
+### Slide 12: Booking, payment and cancellation sequence
 
 Suggested time: 2:00. Sources: use-case-flows.md UC05-06; processing-tables.md
 
-The simplified booking flow eliminates seat holding. BOOK_FLIGHT creates an unpaid booking record with the total fare. Next, the user clicks pay: PAY_BOOKING triggers the server to check user balance and seat availability. If balance covers the fare and seats are free, the server atomically deducts balance, secures seats, generates tickets, and queues the email. If balance is insufficient, the server returns E_INSUFFICIENT_BALANCE with zero deduction.
+The simplified booking process has no pending payment step. The customer sends BOOK_AND_PAY: the server checks ticket status and account balance. On success, it deducts balance, allocates seats, creates ticket codes, and queues the email in one atomic transaction. If balance is insufficient or seats are full, it returns an error with zero deduction. Later, if the customer cancels at least 2 hours before departure, CANCEL_BOOKING releases the seats and refunds 100% of the fare directly to the user's account balance.
 
 ### Slide 13: Real e-ticket email delivery
 
 Suggested time: 1:15. Sources: business-flow.md BR26; processing-tables.md delivery
 
-Distinguish provider acceptance from receipt or reading. SENT does not prove a mailbox received the email. PAY always returns its persisted QUEUED snapshot, including a retry. GET_BOOKING shows the latest email status. No provider has been selected or email sent by this design review.
+Distinguish provider acceptance from receipt or reading. SENT does not prove a mailbox received the email. Book and pay always returns its persisted QUEUED snapshot, including a retry. GET_BOOKING shows the latest email status. No provider has been selected or email sent by this design review.
 
 ### Slide 14: Cancellation and simple refund rules
 
 Suggested time: 1:00. Sources: business-flow.md BR31,33; user refund clarification
 
-This is the user's confirmed simplified policy. Exactly two hours is allowed. Existing disruption means a net departure shift of at least 120 minutes from the accepted baseline. Previously charged change fees remain separate from the current fare. Avoid expanding the talk into complex refund tiers or calculations.
+Since all bookings are paid directly at booking, every cancellation operates on an existing paid ticket. If the customer cancels at least 2 hours before departure, the server releases the seats and refunds 100% of the fare directly to the user's account balance with zero fees. Cancellations within 2 hours are rejected unless the flight is disrupted (delay >= 120 minutes or rescheduled), which waives the cutoff and grants a full 100% refund. Admin flight cancellation triggers an automatic 100% refund to all booked customers. Departed flights cannot be cancelled.
 
 ### Slide 15: Viewing, changing and printing tickets
 
