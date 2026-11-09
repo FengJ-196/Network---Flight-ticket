@@ -1,0 +1,9 @@
+.build-tools/
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.synctex.gz
+*.vrb

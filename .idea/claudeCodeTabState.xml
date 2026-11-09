@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ClaudeCodeTabState">
+    <option name="tabSessions">
+      <map>
+        <entry key="0">
+          <value>
+            <TabSessionState>
+              <option name="projectPath" value="D:\Funfkfdkafda\Network\FlightTicket" />
+              <option name="provider" value="codex" />
+              <option name="sessionId" value="01a1aafd-c816-7a01-8963-d6ddab0d0eaf" />
+              <option name="cwd" value="D:\Funfkfdkafda\Network\FlightTicket" />
+              <option name="model" value="gpt-6.1-sol" />
+              <option name="permissionMode" value="auto" />
+              <option name="reasoningEffort" value="xhigh" />
+            </TabSessionState>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

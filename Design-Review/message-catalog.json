@@ -1,0 +1,676 @@
+{
+  "protocol": "FBP",
+  "version": 1,
+  "currency": "VND",
+  "common_errors": [
+    "E_BAD_JSON",
+    "E_UNSUPPORTED_VERSION",
+    "E_UNKNOWN_TYPE",
+    "E_FRAME_TOO_LARGE",
+    "E_VALIDATION",
+    "E_NOT_AUTHENTICATED",
+    "E_FORBIDDEN",
+    "E_INTERNAL"
+  ],
+  "errors": {
+    "E_BAD_JSON": "protocol",
+    "E_UNSUPPORTED_VERSION": "protocol",
+    "E_UNKNOWN_TYPE": "protocol",
+    "E_FRAME_TOO_LARGE": "protocol",
+    "E_VALIDATION": "validation",
+    "E_NOT_AUTHENTICATED": "auth",
+    "E_FORBIDDEN": "auth",
+    "E_INTERNAL": "server",
+    "E_USERNAME_TAKEN": "conflict",
+    "E_BAD_CREDENTIALS": "auth",
+    "E_ALREADY_LOGGED_IN": "state",
+    "E_NOT_FOUND": "lookup",
+    "E_SEATS_UNAVAILABLE": "business",
+    "E_FLIGHT_UNAVAILABLE": "business",
+    "E_HOLD_EXPIRED": "business",
+    "E_INSUFFICIENT_BALANCE": "business",
+    "E_STATE_CONFLICT": "state",
+    "E_CANCEL_NOT_ALLOWED": "business",
+    "E_CHANGE_NOT_ALLOWED": "business",
+    "E_IDEMPOTENCY_CONFLICT": "conflict",
+    "E_QUOTE_EXPIRED": "business",
+    "E_VERSION_CONFLICT": "conflict"
+  },
+  "messages": {
+    "PING": {
+      "roles": [
+        "ANON",
+        "USER",
+        "ADMIN"
+      ],
+      "required": [],
+      "optional": [],
+      "errors": [],
+      "success_required": [
+        "serverTime"
+      ]
+    },
+    "REGISTER": {
+      "roles": [
+        "ANON"
+      ],
+      "required": [
+        "username",
+        "password",
+        "fullName",
+        "email"
+      ],
+      "optional": [],
+      "errors": [
+        "E_USERNAME_TAKEN",
+        "E_ALREADY_LOGGED_IN"
+      ],
+      "success_required": [
+        "userId",
+        "username",
+        "role",
+        "balance",
+        "currency"
+      ]
+    },
+    "LOGIN": {
+      "roles": [
+        "ANON"
+      ],
+      "required": [
+        "username",
+        "password"
+      ],
+      "optional": [],
+      "errors": [
+        "E_BAD_CREDENTIALS",
+        "E_ALREADY_LOGGED_IN"
+      ],
+      "success_required": [
+        "userId",
+        "username",
+        "role"
+      ]
+    },
+    "LOGOUT": {
+      "roles": [
+        "USER",
+        "ADMIN"
+      ],
+      "required": [],
+      "optional": [],
+      "errors": [],
+      "success_required": []
+    },
+    "GET_BALANCE": {
+      "roles": [
+        "USER"
+      ],
+      "required": [],
+      "optional": [],
+      "errors": [],
+      "success_required": [
+        "balance",
+        "currency"
+      ]
+    },
+    "SEARCH_FLIGHTS": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "origin",
+        "destination",
+        "departDate",
+        "passengers",
+        "seatClass"
+      ],
+      "optional": [
+        "returnDate",
+        "sortBy"
+      ],
+      "errors": [],
+      "success_required": [
+        "passengers",
+        "seatClass",
+        "currency",
+        "outbound",
+        "inbound"
+      ]
+    },
+    "COMPARE_FLIGHTS": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "flightIds",
+        "seatClass",
+        "passengers"
+      ],
+      "optional": [],
+      "errors": [
+        "E_NOT_FOUND",
+        "E_FLIGHT_UNAVAILABLE",
+        "E_SEATS_UNAVAILABLE"
+      ],
+      "success_required": [
+        "rows",
+        "cheapestFlightId",
+        "fastestFlightId"
+      ]
+    },
+    "BOOK_FLIGHT": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "outboundFlightId",
+        "seatClass",
+        "passengers",
+        "contactEmail",
+        "idempotencyKey"
+      ],
+      "optional": [
+        "returnFlightId"
+      ],
+      "errors": [
+        "E_NOT_FOUND",
+        "E_FLIGHT_UNAVAILABLE",
+        "E_SEATS_UNAVAILABLE",
+        "E_IDEMPOTENCY_CONFLICT"
+      ],
+      "success_required": [
+        "bookingCode",
+        "revision",
+        "status",
+        "totalAmount",
+        "currency",
+        "holdExpiresAt",
+        "legs"
+      ]
+    },
+    "PAY_BOOKING": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "bookingCode",
+        "paymentMethod",
+        "idempotencyKey"
+      ],
+      "optional": [],
+      "errors": [
+        "E_NOT_FOUND",
+        "E_STATE_CONFLICT",
+        "E_HOLD_EXPIRED",
+        "E_FLIGHT_UNAVAILABLE",
+        "E_INSUFFICIENT_BALANCE",
+        "E_IDEMPOTENCY_CONFLICT"
+      ],
+      "success_required": [
+        "bookingCode",
+        "revision",
+        "status",
+        "paid",
+        "balanceAfter",
+        "currency",
+        "eTicketCode",
+        "tickets",
+        "delivery"
+      ]
+    },
+    "RESEND_TICKET": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "bookingCode"
+      ],
+      "optional": [],
+      "errors": [
+        "E_NOT_FOUND",
+        "E_STATE_CONFLICT"
+      ],
+      "success_required": [
+        "channel",
+        "to",
+        "status"
+      ]
+    },
+    "LIST_BOOKINGS": {
+      "roles": [
+        "USER"
+      ],
+      "required": [],
+      "optional": [
+        "status",
+        "limit",
+        "offset"
+      ],
+      "errors": [],
+      "success_required": [
+        "bookings",
+        "nextOffset"
+      ]
+    },
+    "GET_BOOKING": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "bookingCode"
+      ],
+      "optional": [],
+      "errors": [
+        "E_NOT_FOUND"
+      ],
+      "success_required": [
+        "bookingCode",
+        "revision",
+        "status",
+        "seatClass",
+        "passengers",
+        "legs",
+        "tickets",
+        "totalPaid",
+        "currency",
+        "disrupted",
+        "createdAt",
+        "paidAt",
+        "delivery"
+      ]
+    },
+    "CANCEL_BOOKING": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "bookingCode"
+      ],
+      "optional": [
+        "dryRun",
+        "idempotencyKey"
+      ],
+      "errors": [
+        "E_NOT_FOUND",
+        "E_STATE_CONFLICT",
+        "E_CANCEL_NOT_ALLOWED",
+        "E_IDEMPOTENCY_CONFLICT"
+      ],
+      "conditional_required": {
+        "when_dryRun_false_or_omitted": [
+          "idempotencyKey"
+        ],
+        "forbidden_when_dryRun_true": [
+          "idempotencyKey"
+        ]
+      },
+      "success_required": [
+        "dryRun",
+        "bookingCode",
+        "fee",
+        "feeReason",
+        "refundAmount",
+        "currency"
+      ]
+    },
+    "CHANGE_BOOKING": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "bookingCode",
+        "legType",
+        "newFlightId"
+      ],
+      "optional": [
+        "dryRun",
+        "idempotencyKey",
+        "quoteId"
+      ],
+      "errors": [
+        "E_NOT_FOUND",
+        "E_STATE_CONFLICT",
+        "E_CHANGE_NOT_ALLOWED",
+        "E_FLIGHT_UNAVAILABLE",
+        "E_SEATS_UNAVAILABLE",
+        "E_INSUFFICIENT_BALANCE",
+        "E_IDEMPOTENCY_CONFLICT",
+        "E_QUOTE_EXPIRED",
+        "E_VERSION_CONFLICT"
+      ],
+      "conditional_required": {
+        "when_dryRun_false_or_omitted": [
+          "quoteId",
+          "idempotencyKey"
+        ],
+        "forbidden_when_dryRun_true": [
+          "quoteId",
+          "idempotencyKey"
+        ]
+      },
+      "success_required": [
+        "dryRun",
+        "bookingCode",
+        "legType",
+        "newFlight",
+        "changeFee",
+        "fareDifference",
+        "netAmount",
+        "currency"
+      ]
+    },
+    "PRINT_TICKET": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "bookingCode"
+      ],
+      "optional": [],
+      "errors": [
+        "E_NOT_FOUND",
+        "E_STATE_CONFLICT"
+      ],
+      "success_required": [
+        "filename",
+        "mimeType",
+        "lines"
+      ]
+    },
+    "GET_NOTIFICATIONS": {
+      "roles": [
+        "USER"
+      ],
+      "required": [],
+      "optional": [
+        "unreadOnly",
+        "limit",
+        "offset"
+      ],
+      "errors": [],
+      "success_required": [
+        "notifications",
+        "nextOffset"
+      ]
+    },
+    "ACK_NOTIFICATION": {
+      "roles": [
+        "USER"
+      ],
+      "required": [
+        "notificationIds"
+      ],
+      "optional": [],
+      "errors": [
+        "E_NOT_FOUND"
+      ],
+      "success_required": [
+        "acknowledged"
+      ]
+    },
+    "ADMIN_LIST_FLIGHTS": {
+      "roles": [
+        "ADMIN"
+      ],
+      "required": [],
+      "optional": [
+        "date",
+        "flightNo",
+        "status",
+        "limit",
+        "offset"
+      ],
+      "errors": [],
+      "success_required": [
+        "flights",
+        "nextOffset"
+      ]
+    },
+    "ADMIN_UPDATE_FLIGHT": {
+      "roles": [
+        "ADMIN"
+      ],
+      "required": [
+        "flightId",
+        "action",
+        "reason",
+        "expectedVersion",
+        "idempotencyKey"
+      ],
+      "optional": [
+        "delayMinutes",
+        "newDepartAt",
+        "newArriveAt"
+      ],
+      "errors": [
+        "E_NOT_FOUND",
+        "E_STATE_CONFLICT",
+        "E_VERSION_CONFLICT",
+        "E_IDEMPOTENCY_CONFLICT"
+      ],
+      "action_fields": {
+        "DELAY": [
+          "delayMinutes"
+        ],
+        "RESCHEDULE": [
+          "newDepartAt",
+          "newArriveAt"
+        ],
+        "CANCEL": []
+      },
+      "success_required": [
+        "flight",
+        "affectedBookings",
+        "notificationsCreated",
+        "pushedOnline"
+      ]
+    }
+  },
+  "push": {
+    "NOTIFY": {
+      "direction": "S->C",
+      "id": null,
+      "required": [
+        "notificationId",
+        "kind",
+        "bookingCode",
+        "flightId",
+        "flightVersion",
+        "flightNo",
+        "oldDepartAt",
+        "freeCancellation",
+        "message",
+        "createdAt"
+      ]
+    }
+  },
+  "transport": {
+    "name": "TCP",
+    "defaultPort": 9090,
+    "encoding": "UTF-8",
+    "framing": "JSON object + LF; optional CR before LF",
+    "maxPayloadBytes": 65536,
+    "frameTimeoutSeconds": 10,
+    "idleSeconds": 300,
+    "requestTimeoutSeconds": 10
+  },
+  "field_types": {
+    "destination": "string",
+    "legType": "string",
+    "departDate": "string",
+    "bookingCode": "string",
+    "expectedVersion": "integer",
+    "passengers": "integer_or_passenger_array",
+    "returnFlightId": "string",
+    "origin": "string",
+    "limit": "integer",
+    "date": "string",
+    "status": "string",
+    "unreadOnly": "boolean",
+    "newDepartAt": "string",
+    "seatClass": "string",
+    "offset": "integer",
+    "paymentMethod": "string",
+    "outboundFlightId": "string",
+    "reason": "string",
+    "notificationIds": "string_array",
+    "username": "string",
+    "fullName": "string",
+    "flightIds": "string_array",
+    "delayMinutes": "integer",
+    "contactEmail": "string",
+    "action": "string",
+    "idempotencyKey": "string",
+    "newFlightId": "string",
+    "sortBy": "string",
+    "password": "string",
+    "email": "string",
+    "dryRun": "boolean",
+    "flightNo": "string",
+    "quoteId": "string",
+    "newArriveAt": "string",
+    "returnDate": "string",
+    "flightId": "string"
+  },
+  "enums": {
+    "seatClass": [
+      "ECONOMY",
+      "PREMIUM_ECONOMY",
+      "BUSINESS"
+    ],
+    "sortBy": [
+      "PRICE",
+      "DEPARTURE",
+      "DURATION"
+    ],
+    "paymentMethod": [
+      "CREDIT_CARD",
+      "E_WALLET"
+    ],
+    "legType": [
+      "OUTBOUND",
+      "RETURN"
+    ],
+    "action": [
+      "DELAY",
+      "RESCHEDULE",
+      "CANCEL"
+    ]
+  },
+  "objects": {
+    "Passenger": {
+      "required": [
+        "fullName",
+        "dob",
+        "idNumber"
+      ],
+      "additionalFields": false
+    },
+    "Offer": {
+      "required": [
+        "flightId",
+        "version",
+        "airline",
+        "flightNo",
+        "origin",
+        "destination",
+        "departAt",
+        "arriveAt",
+        "durationMin",
+        "status",
+        "seatClass",
+        "pricePerPax",
+        "totalPrice",
+        "seatsLeft"
+      ]
+    },
+    "Notification": {
+      "required": [
+        "notificationId",
+        "kind",
+        "bookingCode",
+        "flightId",
+        "flightVersion",
+        "flightNo",
+        "oldDepartAt",
+        "freeCancellation",
+        "message",
+        "createdAt"
+      ],
+      "kind_fields": {
+        "DELAY": [
+          "newDepartAt",
+          "newArriveAt",
+          "delayMinutes"
+        ],
+        "SCHEDULE_CHANGE": [
+          "newDepartAt",
+          "newArriveAt"
+        ],
+        "FLIGHT_CANCELLED": [
+          "refundAmount"
+        ]
+      }
+    },
+    "QuoteResult": {
+      "required": [
+        "quoteId",
+        "quoteExpiresAt",
+        "bookingRevision",
+        "balanceIfApplied"
+      ]
+    },
+    "AppliedQuoteResult": {
+      "required": [
+        "status",
+        "revision",
+        "balanceAfter"
+      ]
+    },
+    "EmailDelivery": {
+      "required": [
+        "to",
+        "status"
+      ],
+      "status_values": [
+        "QUEUED",
+        "SENT",
+        "FAILED"
+      ],
+      "recipient": "masked saved booking contactEmail"
+    },
+    "CancellationPreviewResult": {
+      "required": [
+        "bookingRevision",
+        "balanceIfApplied"
+      ],
+      "advisory": true,
+      "storesQuote": false
+    }
+  },
+  "delivery_statuses": [
+    "QUEUED",
+    "SENT",
+    "FAILED"
+  ],
+  "validation_scope": "Field inventory and structural descriptors; authoritative semantic constraints are in message-spec.md, not a full JSON Schema.",
+  "delivery_channels": [
+    "EMAIL"
+  ],
+  "email_delivery": {
+    "mode": "REAL",
+    "recipient": "booking.contactEmail",
+    "provider": "configured on server",
+    "sent_meaning": "provider accepted email; actual inbox receipt verified separately",
+    "retry_semantics": "durable jobs; duplicate email possible after uncertain acceptance; no duplicate charge/tickets"
+  },
+  "cancellation_policy": {
+    "fee": 0,
+    "paidRefund": "full current fare",
+    "minimumHoursBeforeDeparture": 2,
+    "disruptedBeforeDeparture": "full current fare; two-hour cutoff waived",
+    "pendingPayment": "release live holds; refund zero",
+    "quoteRequired": false
+  }
+}
