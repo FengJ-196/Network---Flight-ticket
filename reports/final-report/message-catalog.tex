@@ -30,332 +30,274 @@
 \setbeamertemplate{background}{\drawHustPageNum}
 \begin{frame}{Booking lifecycle and system responsibilities}
 \small\contractrows
-\begin{tabularx}{\textwidth}{@{}p{2.65cm}Y@{}}
-\labelrow{Customer} & Search and compare offers, then confirm the itinerary and total fare. One booking request purchases the tickets using the signed-in customer's stored balance. \\
-\addlinespace[2pt]
-\labelrow{Server} & The server binds the signed-in role to the connection and logs requests and replies with sensitive fields redacted. The server owns inventory, booking revisions and balances. One database transaction sells the seats, debits the account, issues the tickets and queues the email for delivery after commit. \\
-\addlinespace[2pt]
-\labelrow{Administrator} & A delay, reschedule or cancellation updates affected bookings. The server stores customer notifications and also pushes them to online clients. \\
+\begin{tabularx}{\textwidth}{|p{2.65cm}|Y|}
+\hline
+\labelrow{Customer} & Register and log in, search and compare flights, and book tickets using account balance. Can view, print, cancel, or change bookings. \\
+\hline
+\labelrow{Server} & Listens over TCP, logs all requests and replies, manages mocked flight data, deducts balance on booking, and sends e-tickets via email. \\
+\hline
+\labelrow{Administrator} & Updates flight status (delay, reschedule, or cancel). The server stores notifications and pushes them to online customers. \\
+\hline
 \end{tabularx}
-
 \end{frame}
 
 \begin{frame}{How to read a message contract}
 \small\contractrows
-\begin{tabularx}{\textwidth}{@{}p{2.65cm}Y@{}}
-\labelrow{Request} & One UTF-8 JSON object per line over TCP. Required envelope fields are \msg{v} (integer 1), \msg{type} (uppercase command), \msg{id} (unique on this connection) and \msg{data} (object). \\
-\addlinespace[2pt]
-\labelrow{Reply} & Append \msg{_RESP} to the command and echo its ID. Success adds \msg{ok} = true and \msg{code} = OK. Failure sets \msg{ok} = false and supplies a stable error code, a human-readable \msg{message} and structured context in \msg{data}. \\
-\addlinespace[2pt]
+\begin{tabularx}{\textwidth}{|p{2.65cm}|Y|}
+\hline
+\labelrow{Request} & One UTF-8 JSON object per line over TCP. Required envelope fields are \msg{type} (uppercase command), \msg{id} (unique on this connection), \msg{sessionId} (session token, \msg{null} before sign-in), \msg{date} (ISO-8601 timestamp when sent) and \msg{data} (object). \\
+\hline
+\labelrow{Reply} & Append \msg{_RESP} to the command and echo \msg{id}, \msg{sessionId} and \msg{date}. Success sets \msg{code} = OK. Failure sets \msg{code} to an error code (\msg{E_...}), with a human-readable \msg{message} and context in \msg{data}. \\
+\hline
 \labelrow{Push} & \msg{NOTIFY} uses a null ID. A push may arrive before a pending reply. Match replies by ID and dispatch pushes by type. \\
-\addlinespace[2pt]
-\labelrow{Field notation} & The following contracts list the fields inside \msg{data}. Fields marked ? are optional or conditional. An empty object is written \{\}. The example on the next slide omits the constant version field for readability. \\
+\hline
+\labelrow{Field notation} & The following contracts list the fields inside \msg{data}. Fields marked ? are optional or conditional. An empty object is written \{\}. \\
+\hline
 \end{tabularx}
 
 \end{frame}
 
-\begin{frame}[fragile]{Account balance}
-\small\begin{tabular}{@{}p{0.46\textwidth}|p{0.49\textwidth}@{}}
-\labelrow{Client $\rightarrow$ Server} & \labelrow{Server $\rightarrow$ Client} \\
-\midrule
+\begin{frame}[fragile]{Message example: \small\msg{LOGIN}}
+\footnotesize\begin{tabular}{@{}p{0.44\textwidth}|p{0.51\textwidth}@{}}
+\labelrow{Client $\rightarrow$ Server (Request)} & \labelrow{Server $\rightarrow$ Client (Success / Failure)} \\
+\hline
 \begin{minipage}[t]{\linewidth}\footnotesize
 \begin{verbatim}
 {
-  "type": "GET_BALANCE",
-  "id": "c-008",
-  "data": {}
+  "type": "LOGIN",
+  "id": "req-001",
+  "sessionId": null,
+  "date": "2026-11-25T14:30:00+07:00",
+  "data": {
+    "username": "hieu",
+    "password": "secret"
+  }
 }
 \end{verbatim}
+\vspace{4pt}
+\raggedright\footnotesize If credentials match, \msg{code} is \msg{OK} and \msg{sessionId} is assigned. Otherwise \msg{code} is \msg{E_BAD_CREDENTIALS}.
 \end{minipage}
 &
 \begin{minipage}[t]{\linewidth}\footnotesize
 \begin{verbatim}
 {
-  "type": "GET_BALANCE_RESP",
-  "id": "c-008",
-  "ok": true,
+  "type": "LOGIN_RESP", "id": "req-001",
+  "sessionId": "sess-9f3a",
+  "date": "2026-11-25T14:30:00+07:00",
   "code": "OK",
   "data": {
-    "balance": 5000000,
-    "currency": "VND"
+    "userId": "u-101", "role": "USER",
+    "balance": 5000000, "unreadNotifications": 1
   }
+}
+{
+  "type": "LOGIN_RESP", "id": "req-001",
+  "sessionId": null,
+  "date": "2026-11-25T14:30:00+07:00",
+  "code": "E_BAD_CREDENTIALS",
+  "message": "Invalid credentials.",
+  "data": {}
 }
 \end{verbatim}
 \end{minipage}
 \end{tabular}
 \end{frame}
 
-\begin{frame}{Account creation and sign-in}
-\footnotesize\contractrows
-\begin{tabularx}{\textwidth}{@{}p{1.9cm}YY@{}}
-\toprule & \msg{REGISTER} & \msg{LOGIN} \\
-\midrule
-\labelrow{Request} & \msg{username}, \msg{password}, \msg{fullName}, \msg{email} & \msg{username}, \msg{password} \\
-\addlinespace[2pt]
-\labelrow{Success} & \msg{userId}, \msg{username}, \msg{role}, \msg{balance}, \msg{currency} & \msg{userId}, \msg{username}, \msg{role} \\
-\addlinespace[2pt]
-\labelrow{USER login adds} & --- & \msg{balance}, \msg{currency}, \msg{unreadNotifications} \\
-\addlinespace[2pt]
-\labelrow{Caller} & Guest & Guest \\
-\bottomrule
+\begin{frame}{Account creation, sign-in and sign-out}
+\footnotesize\renewcommand{\arraystretch}{1.1}
+\begin{tabularx}{\textwidth}{|p{1.75cm}|Y|Y|Y|}
+\hline
+ & \msg{REGISTER} & \msg{LOGIN} & \msg{LOGOUT} \\
+\hline
+\labelrow{Role / Auth} & Guest (\msg{sessionId}: null) & Guest (\msg{sessionId}: null) & Customer or Admin (\msg{sessionId} required) \\
+\hline
+\labelrow{Request} & \msg{username}, \msg{password}, \msg{email} & \msg{username}, \msg{password} & \texttt{\{\}} \\
+\hline
+\labelrow{Success} & \msg{OK}: \msg{userId}, \msg{username}, \msg{role}, \msg{balance} & \msg{OK}: \msg{userId}, \msg{username}, \msg{role} (USER adds \msg{balance}, \msg{unreadNotifications}) & \msg{OK}: \texttt{\{\}} \\
+\hline
+\labelrow{Errors} & \msg{E_VALIDATION}, \msg{E_USERNAME_TAKEN}, \msg{E_ALREADY_LOGGED_IN} & \msg{E_BAD_CREDENTIALS}, \msg{E_ALREADY_LOGGED_IN} & \msg{E_NOT_AUTHENTICATED} \\
+\hline
+\labelrow{Notes} & Creates customer account and opens session. & Returns new \msg{sessionId} in reply envelope. & Server closes the connection after sending reply. \\
+\hline
 \end{tabularx}
 \end{frame}
 
-\begin{frame}{Connection checks and sign-out}
-\footnotesize\contractrows
-\begin{tabularx}{\textwidth}{@{}p{1.9cm}YY@{}}
-\toprule & \msg{PING} & \msg{LOGOUT} \\
-\midrule
-\labelrow{Request} & \texttt{\{\}} & \texttt{\{\}} \\
-\addlinespace[2pt]
-\labelrow{Success} & \msg{serverTime} & \texttt{\{\}} \\
-\addlinespace[2pt]
-\labelrow{Caller} & Any connection & Signed-in customer or administrator \\
-\addlinespace[2pt]
-\labelrow{Socket after reply} & Stays open. The timestamp confirms the server answered. & Server closes the connection after sending the reply. \\
-\bottomrule
-\end{tabularx}
+\begin{frame}{Login flow: authenticate and start session}
+\centering\begin{tikzpicture}[x=1cm,y=1.15cm,font=\footnotesize]
+\foreach \x/\name in {0/Client,5.2/Booking server,10.4/Database} {
+  \node[text=hustprimary,font=\small\bfseries] at (\x,0) {\name};
+  \draw[gray,dashed] (\x,-0.24) -- (\x,-4.0);
+}
+\draw[->,thick] (0,-0.85) -- node[above]{\msg{LOGIN} (\msg{username}, \msg{password}, \msg{sessionId}: null)} (5.2,-0.85);
+\draw[->,thick] (5.2,-1.55) -- node[above]{Verify credentials and load profile} (10.4,-1.55);
+\draw[->,dashed] (10.4,-2.25) -- node[above]{User record, role, balance, unread count} (5.2,-2.25);
+\node[align=center,fill=white] at (5.2,-2.90) {Create \msg{sessionId}; bind role to connection};
+\draw[->,dashed] (5.2,-3.65) -- node[above]{\msg{LOGIN_RESP} (\msg{code}: OK, \msg{sessionId})} (0,-3.65);
+\end{tikzpicture}
+\par\raggedright\footnotesize\labelrow{If authentication fails} The server returns \msg{E_BAD_CREDENTIALS} with \msg{sessionId} = null and keeps the connection anonymous.
 \end{frame}
 
 \begin{frame}{Flight discovery and comparison}
-\footnotesize\contractrows
-\begin{tabularx}{\textwidth}{@{}p{1.9cm}YY@{}}
-\toprule & \msg{SEARCH_FLIGHTS} & \msg{COMPARE_FLIGHTS} \\
-\midrule
-\labelrow{Request} & \msg{origin}, \msg{destination}, \msg{departDate}, \msg{passengers}, \msg{seatClass}, \msg{returnDate?}, \msg{sortBy?} & \msg{flightIds}, \msg{seatClass}, \msg{passengers} \\
-\addlinespace[2pt]
-\labelrow{Success} & \msg{passengers}, \msg{seatClass}, \msg{currency}, \msg{outbound}, \msg{inbound} & \msg{rows}, \msg{cheapestFlightId}, \msg{fastestFlightId} \\
-\addlinespace[2pt]
-\labelrow{Availability} & An empty result is a successful search. & Select 2--5 distinct flights on the same route and date. Each must still have enough seats. \\
-\bottomrule
+\footnotesize\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{|p{1.9cm}|Y|Y|}
+\hline
+ & \msg{SEARCH_FLIGHTS} & \msg{COMPARE_FLIGHTS} \\
+\hline
+\labelrow{Role / Auth} & Any (\msg{sessionId} optional) & Any (\msg{sessionId} optional) \\
+\hline
+\labelrow{Request} & \msg{origin}, \msg{destination}, \msg{departDate}, \msg{seatClass?}, \msg{returnDate?} & \msg{flightIds}, \msg{seatClass?} \\
+\hline
+\labelrow{Success} & \msg{OK}: \msg{seatClass}, \msg{seatsLeft}, \msg{price}, \msg{outbound}, \msg{inbound} & \msg{OK}: \msg{rows}, \msg{cheapestFlightId}, \msg{fastestFlightId} \\
+\hline
+\labelrow{Errors} & \msg{E_VALIDATION} & \msg{E_VALIDATION}, \msg{E_SEATS_UNAVAILABLE}, \msg{E_NOT_FOUND} \\
+\hline
+\labelrow{Notes} & An empty result is a valid \msg{OK} response. & Select 2--5 distinct flights on the same route and date. \\
+\hline
 \end{tabularx}
 \end{frame}
 
 \begin{frame}{Direct purchase: \small\msg{BOOK_FLIGHT}}
-\footnotesize\contractrows
-\begin{tabularx}{\textwidth}{@{}p{2.6cm}Y@{}}
-\labelrow{Request} & \msg{outboundFlightId}, \msg{returnFlightId?}, \msg{seatClass}, \msg{passengers}, \msg{contactEmail}, \msg{confirmedTotal}, \msg{idempotencyKey} \\
-\labelrow{Fare check} & \msg{confirmedTotal} is the integer VND amount the customer accepted. The server calculates the current total from the database for all legs and passengers. If the fare differs, return the current amount for confirmation. \\
-\labelrow{Success} & \msg{bookingCode}, \msg{revision}, \msg{status} = \msg{TICKETED}, \msg{paid}, \msg{currency}, \msg{balanceAfter}, \msg{legs}, \msg{eTicketCode}, \msg{tickets}, \msg{delivery} \\
-\labelrow{Lost reply} & After reconnecting and signing in, retry the same payload and key with a fresh request ID. The server returns the saved result. A replay leaves the seat count, balance and email queue unchanged. \\
+\footnotesize\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{|p{2.2cm}|Y|}
+\hline
+\labelrow{Role / Auth} & Customer (\msg{sessionId} required) \\
+\hline
+\labelrow{Request} & \msg{outboundFlightId}, \msg{returnFlightId?}, \msg{seatClass}, \msg{passengers} \\
+\hline
+\labelrow{Success} & \msg{OK}: \msg{bookingCode}, \msg{status} = \msg{TICKETED}, \msg{paid}, \msg{balanceAfter}, \msg{eTicketCode}, \msg{legs} \\
+\hline
+\labelrow{Errors} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND}, \msg{E_SEATS_UNAVAILABLE}, \msg{E_INSUFFICIENT_BALANCE} \\
+\hline
+\labelrow{Notes} & Server checks seats and balance, deducts fare, and sends the e-ticket to the user's email. \\
+\hline
 \end{tabularx}
 \end{frame}
 
-\begin{frame}{Booking sequence: confirm, debit and issue}
+\begin{frame}{Booking sequence: verify, pay and issue}
 \centering\begin{tikzpicture}[x=1cm,y=1.15cm,font=\footnotesize]
 \foreach \x/\name in {0/Customer client,5.2/Booking server,10.4/Database} {
   \node[text=hustprimary,font=\small\bfseries] at (\x,0) {\name};
-  \draw[gray,dashed] (\x,-0.24) -- (\x,-4.2);
+  \draw[gray,dashed] (\x,-0.24) -- (\x,-4.0);
 }
-\draw[->,thick] (0,-0.85) -- node[above]{Confirm itinerary and fare} (5.2,-0.85);
-\draw[->,thick] (5.2,-1.55) -- node[above]{Begin transaction; check key} (10.4,-1.55);
-\node[align=center,fill=white] at (7.8,-2.02) {Lock rows; check fare, seats and funds.};
-\draw[->,thick] (5.2,-3.15) -- node[above,align=center]{Debit, sell seats, issue tickets,\\save result and email job; commit} (10.4,-3.15);
-\draw[->,dashed] (10.4,-3.70) -- node[above]{Committed result} (5.2,-3.70);
-\draw[->,dashed] (5.2,-4.15) -- node[above]{Booking code and tickets} (0,-4.15);
+\draw[->,thick] (0,-0.85) -- node[above]{\msg{BOOK_FLIGHT} (flights, class, passengers)} (5.2,-0.85);
+\draw[->,thick] (5.2,-1.55) -- node[above]{Check seat availability and user balance} (10.4,-1.55);
+\draw[->,thick] (5.2,-2.35) -- node[above]{Deduct balance, update seats, save booking} (10.4,-2.35);
+\draw[->,dashed] (10.4,-3.05) -- node[above]{Booking saved} (5.2,-3.05);
+\draw[->,dashed] (5.2,-3.70) -- node[above]{\msg{BOOK_FLIGHT_RESP} (\msg{code}: OK, \msg{bookingCode}, \msg{eTicketCode})} (0,-3.70);
 \end{tikzpicture}
-\par\raggedright\footnotesize\labelrow{If a check fails} The transaction rolls back. The customer receives the error code and the account balance and seat counts stay unchanged.
+\par\raggedright\footnotesize\labelrow{On failure} If seats or balance are insufficient, no changes are saved and the server returns \msg{E_SEATS_UNAVAILABLE} or \msg{E_INSUFFICIENT_BALANCE}.
 \end{frame}
 
 \begin{frame}{Booking list and detail}
-\footnotesize\contractrows
-\begin{tabularx}{\textwidth}{@{}p{1.9cm}YY@{}}
-\toprule & \msg{LIST_BOOKINGS} & \msg{GET_BOOKING} \\
-\midrule
-\labelrow{Request} & \msg{status?}, \msg{limit?}, \msg{offset?} & \msg{bookingCode} \\
-\addlinespace[2pt]
-\labelrow{Success} & \msg{bookings}, \msg{nextOffset} & \msg{bookingCode}, \msg{revision}, \msg{status}, \msg{seatClass}, \msg{passengers}, \msg{legs}, \msg{tickets}, \msg{totalPaid}, \msg{currency}, \msg{disrupted}, \msg{createdAt}, \msg{paidAt}, \msg{delivery} \\
-\addlinespace[2pt]
-\labelrow{Missing booking} & An empty page is a success. & A missing booking and a booking owned by another customer produce the same lookup failure. \\
-\bottomrule
+\footnotesize\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{|p{1.9cm}|Y|Y|}
+\hline
+ & \msg{LIST_BOOKINGS} & \msg{GET_BOOKING} \\
+\hline
+\labelrow{Role / Auth} & Customer (\msg{sessionId} required) & Customer (\msg{sessionId} required, owner only) \\
+\hline
+\labelrow{Request} & \msg{status?} & \msg{bookingCode} \\
+\hline
+\labelrow{Success} & \msg{OK}: \msg{bookings} & \msg{OK}: \msg{bookingCode}, \msg{status}, \msg{seatClass}, \msg{passengers}, \msg{legs}, \msg{totalPaid}, \msg{eTicketCode} \\
+\hline
+\labelrow{Errors} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND} \\
+\hline
+\labelrow{Notes} & Empty list is a valid \msg{OK} response. & Missing or another user's booking returns \msg{E_NOT_FOUND}. \\
+\hline
 \end{tabularx}
 \end{frame}
 
-\begin{frame}{Cancellation and itinerary changes}
-\footnotesize\renewcommand{\arraystretch}{1.03}
-\begin{tabularx}{\textwidth}{@{}p{1.9cm}p{4cm}Y@{}}
-\toprule & \msg{CANCEL_BOOKING} & \msg{CHANGE_BOOKING} \\
-\midrule
-\labelrow{Request} & \msg{bookingCode}, \msg{dryRun?} & \msg{bookingCode}, \msg{legType}, \msg{newFlightId}, \msg{dryRun?} \\
-\addlinespace[1pt]
-\labelrow{Apply input} & \msg{idempotencyKey} & \msg{quoteId}, \msg{idempotencyKey} \\
-\addlinespace[1pt]
-\labelrow{Success} & \msg{dryRun}, \msg{bookingCode}, \msg{fee}, \msg{feeReason}, \msg{refundAmount}, \msg{currency} & \msg{dryRun}, \msg{bookingCode}, \msg{legType}, \msg{newFlight}, \msg{changeFee}, \msg{fareDifference}, \msg{netAmount}, \msg{currency} \\
-\addlinespace[1pt]
-\labelrow{Preview adds} & \msg{bookingRevision}, \msg{balanceIfApplied} & \msg{quoteId}, \msg{quoteExpiresAt}, \msg{bookingRevision}, \msg{balanceIfApplied} \\
-\addlinespace[1pt]
-\labelrow{Apply adds} & \msg{status}, \msg{revision}, \msg{balanceAfter} & \msg{status}, \msg{revision}, \msg{balanceAfter} \\
-\labelrow{Policy} & Refund the full fare until two hours before departure. Disruption permits a full refund until departure. & Preview returns a 60-second quote. Apply rechecks fare, inventory and balance. \\
-\bottomrule\end{tabularx}
-\end{frame}
-
-\begin{frame}{Printing and email delivery}
-\footnotesize\contractrows
-\begin{tabularx}{\textwidth}{@{}p{1.9cm}YY@{}}
-\toprule & \msg{PRINT_TICKET} & \msg{RESEND_TICKET} \\
-\midrule
-\labelrow{Request} & \msg{bookingCode} & \msg{bookingCode} \\
-\addlinespace[2pt]
-\labelrow{Success} & \msg{filename}, \msg{mimeType}, \msg{lines} & \msg{channel}, \msg{to}, \msg{status} \\
-\addlinespace[2pt]
-\labelrow{Effect} & The client saves or prints the current ticket text. & The server sends existing tickets to the saved email. A delivery failure preserves the paid booking. \\
-\bottomrule
+\begin{frame}{Cancellation, itinerary change and printing}
+\footnotesize\renewcommand{\arraystretch}{1.08}
+\begin{tabularx}{\textwidth}{|p{1.75cm}|Y|Y|Y|}
+\hline
+ & \msg{CANCEL_BOOKING} & \msg{CHANGE_BOOKING} & \msg{PRINT_TICKET} \\
+\hline
+\labelrow{Role / Auth} & Customer (owner) & Customer (owner) & Customer (owner) \\
+\hline
+\labelrow{Request} & \msg{bookingCode} & \msg{bookingCode}, \msg{legType}, \msg{newFlightId} & \msg{bookingCode} \\
+\hline
+\labelrow{Success} & \msg{OK}: \msg{bookingCode}, \msg{status}, \msg{refundAmount}, \msg{balanceAfter} & \msg{OK}: \msg{bookingCode}, \msg{newFlight}, \msg{netAmount}, \msg{balanceAfter} & \msg{OK}: \msg{filename}, \msg{lines} \\
+\hline
+\labelrow{Errors} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND} & \msg{E_NOT_AUTHENTICATED}, \msg{E_NOT_FOUND}, \msg{E_SEATS_UNAVAILABLE}, \msg{E_INSUFFICIENT_BALANCE} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND} \\
+\hline
+\labelrow{Notes} & Cancels booking and refunds fare to balance. & Client shows a confirmation box before sending. & Returns printable ticket text lines. \\
+\hline
 \end{tabularx}
 \end{frame}
 
-\begin{frame}{Flight administration}
-\footnotesize\contractrows
-\begin{tabularx}{\textwidth}{@{}p{1.9cm}YY@{}}
-\toprule & \msg{ADMIN_LIST_FLIGHTS} & \msg{ADMIN_UPDATE_FLIGHT} \\
-\midrule
-\labelrow{Request} & \msg{date?}, \msg{flightNo?}, \msg{status?}, \msg{limit?}, \msg{offset?} & \msg{flightId}, \msg{action}, \msg{reason}, \msg{expectedVersion}, \msg{idempotencyKey} \\
-\addlinespace[2pt]
-\labelrow{Action inputs} & --- & \msg{DELAY}: \msg{delayMinutes}. \msg{RESCHEDULE}: \msg{newDepartAt}, \msg{newArriveAt}. \msg{CANCEL}: none. \\
-\addlinespace[2pt]
-\labelrow{Success} & \msg{flights}, \msg{nextOffset} & \msg{flight}, \msg{affectedBookings}, \msg{notificationsCreated}, \msg{pushedOnline} \\
-\addlinespace[2pt]
-\labelrow{Concurrency} & Read the version before submitting an update. & If another administrator changed the flight, reload its current version before applying the update. \\
-\bottomrule
+\begin{frame}{Flight administration and notifications}
+\footnotesize\renewcommand{\arraystretch}{1.08}
+\begin{tabularx}{\textwidth}{|p{1.75cm}|Y|Y|Y|}
+\hline
+ & \msg{ADMIN_UPDATE_FLIGHT} & \msg{NOTIFY} & \msg{GET_NOTIFICATIONS} \\
+\hline
+\labelrow{Role / Auth} & Admin (\msg{sessionId} required) & Server push (online Customer) & Customer (\msg{sessionId} required) \\
+\hline
+\labelrow{Request} & \msg{flightId}, \msg{action}, \msg{reason?} & --- (server push; \msg{id}: null) & \msg{unreadOnly?} \\
+\hline
+\labelrow{Success} & \msg{OK}: \msg{flight}, \msg{affectedBookings} & Push: \msg{kind}, \msg{bookingCode}, \msg{flightNo}, \msg{message}, \msg{createdAt} & \msg{OK}: \msg{notifications} \\
+\hline
+\labelrow{Errors} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND}, \msg{E_VALIDATION} & --- (push receives no reply) & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN} \\
+\hline
+\labelrow{Notes} & \msg{DELAY} adds \msg{delayMinutes}; \msg{RESCHEDULE} adds \msg{newDepartAt}, \msg{newArriveAt}; \msg{CANCEL} has none. & Pushed to online affected customers on flight update. & Returns stored notifications for offline/reconnected users. \\
+\hline
 \end{tabularx}
-\end{frame}
-
-\begin{frame}{Live updates, inbox and read receipts}
-\footnotesize\renewcommand{\arraystretch}{1.03}
-\begin{tabularx}{\textwidth}{@{}p{1.9cm}YYY@{}}
-\toprule & \msg{NOTIFY} & \msg{GET_NOTIFICATIONS} & \msg{ACK_NOTIFICATION} \\
-\midrule
-\labelrow{Request} & --- & \msg{unreadOnly?}, \msg{limit?}, \msg{offset?} & \msg{notificationIds} \\
-\addlinespace[1pt]
-\labelrow{Reply / push} & \msg{notificationId}, \msg{kind}, \msg{bookingCode}, \msg{flightId}, \msg{flightVersion}, \msg{flightNo}, \msg{oldDepartAt}, \msg{freeCancellation}, \msg{message}, \msg{createdAt} & \msg{notifications}, \msg{nextOffset} & \msg{acknowledged} \\
-\bottomrule
-\end{tabularx}
-\par\smallskip Delay and reschedule add \msg{newDepartAt} and \msg{newArriveAt}. Delay also adds \msg{delayMinutes}. Cancellation adds \msg{refundAmount}. Inbox items include \msg{read}. A push receives no reply. Acknowledgment marks stored items as read.
-\end{frame}
-
-\begin{frame}{Which error does the server return?}
-\small\contractrows
-\begin{tabularx}{\textwidth}{@{}p{2.65cm}Y@{}}
-\labelrow{1. Decode} & Check frame size, UTF-8 and JSON, then envelope, version, direction, command and request ID. Send \msg{ERROR_RESP} for failures at this stage. Echo a usable ID when available. Malformed JSON and oversize frames use null. \\
-\addlinespace[2pt]
-\labelrow{2. Authorize} & For a recognized request with a valid envelope, use its typed reply. Check login for protected commands and role where restricted. Then validate payload fields. Report the first invalid required field, then optional or conditional fields in catalog order. \\
-\addlinespace[2pt]
-\labelrow{3. Check retry} & For requests with an idempotency key, look up (user, type, key). An exact replay returns the saved success. A changed payload with the same key produces \msg{E_IDEMPOTENCY_CONFLICT}. \\
-\addlinespace[2pt]
-\labelrow{4. Apply} & Run the checks required by the command. A purchase checks seats and funds. An inbox read checks ownership. A failure after commit requires recovery of the saved result or connection closure so the client can reconcile. \\
-\end{tabularx}
-
 \end{frame}
 
 \appendix
-\begin{frame}{Appendix: shared field types}
+\begin{frame}{Appendix: shared data types}
 \small\contractrows
-\begin{tabularx}{\textwidth}{@{}p{2.65cm}Y@{}}
-\labelrow{Identifiers} & Resource IDs are nonempty ASCII strings up to 64 characters. Booking and e-ticket codes are six uppercase letters or digits. A request ID or mutation key is 1--64 ASCII letters, digits, underscores or hyphens. \\
-\addlinespace[2pt]
-\labelrow{Dates and money} & Dates use YYYY-MM-DD. Timestamps include the +07:00 offset. Amounts are integer VND. Fare differences, net change amounts and projected balances may be signed. Versions and revisions start at 1. \\
-\addlinespace[2pt]
-\labelrow{Seat and leg} & Seat class is ECONOMY, PREMIUM\_ECONOMY or BUSINESS. A leg is OUTBOUND or RETURN. Airport codes are three uppercase letters. \\
-\addlinespace[2pt]
-\labelrow{Pagination} & \msg{limit} is 1--20 (default 20). \msg{offset} is 0--10000 (default 0). \msg{nextOffset} is the next integer offset, or null at the end. Optional boolean flags default to false. \\
-\end{tabularx}
-
-\end{frame}
-
-\begin{frame}{The Offer returned by search and comparison}
-\small\contractrows
-\begin{tabularx}{\textwidth}{@{}p{2.65cm}Y@{}}
-\labelrow{Flight identity} & \msg{flightId}, \msg{version}, \msg{flightNo} and \msg{airline} (object with \msg{code} and \msg{name}). The version identifies the flight snapshot. \\
-\addlinespace[2pt]
-\labelrow{Schedule} & \msg{origin}, \msg{destination}, \msg{departAt}, \msg{arriveAt}, \msg{durationMin}, \msg{status}. Duration is a positive integer in minutes. \\
-\addlinespace[2pt]
-\labelrow{Fare and seats} & \msg{seatClass}, \msg{pricePerPax}, \msg{totalPrice}, \msg{seatsLeft}. Total price equals the unit fare times the requested passenger count. Seats left counts availability for the selected class. \\
-\end{tabularx}
-
-\end{frame}
-
-\begin{frame}{Passenger and Leg records}
-\small\contractrows
-\begin{tabularx}{\textwidth}{@{}p{2.65cm}Y@{}}
-\labelrow{Passenger} & \msg{fullName}, \msg{dob} (calendar date), \msg{idNumber} (up to 32 ASCII letters or digits). Each passenger must be at least 18 at outbound departure. Identity numbers must be distinct within a booking. \\
-\addlinespace[2pt]
-\labelrow{Leg} & \msg{legType}, \msg{flightId}, \msg{flightNo}, \msg{origin}, \msg{destination}, \msg{departAt}, \msg{arriveAt}, \msg{flightStatus}, \msg{fare}. The fare covers all passengers on that leg. \\
-\addlinespace[2pt]
-\labelrow{Booking status} & TICKETED, CANCELLED or FLIGHT\_CANCELLED. Only TICKETED bookings have active printable tickets. Previously issued numbers remain in the booking history. \\
-\end{tabularx}
-
-\end{frame}
-
-\begin{frame}{Frame and envelope errors}
-\footnotesize\renewcommand{\arraystretch}{1.06}
-\begin{tabularx}{\textwidth}{@{}lYY@{}}
-\toprule \labelrow{Code} & \labelrow{Trigger and error data} & \labelrow{Client action} \\
-\midrule
-\msg{E_BAD_JSON} & Invalid UTF-8 or JSON object, duplicate keys or malformed complete line. Empty context. & Fix the encoding and send a new frame. The connection stays open. \\
-\addlinespace[1pt]
-\msg{E_FRAME_TOO_LARGE} & Payload exceeds 65,536 bytes before the delimiter. Context gives \msg{maxBytes}. & The server replies if possible and closes. Reduce the payload and reconnect. \\
-\addlinespace[1pt]
-\msg{E_UNSUPPORTED_VERSION} & Unsupported integer version. \msg{supported} contains [1]. & Select a supported version. \\
-\addlinespace[1pt]
-\msg{E_UNKNOWN_TYPE} & Unknown command. Context echoes \msg{type}. & Correct the request type. \\
-\addlinespace[1pt]
-\msg{E_VALIDATION} & Invalid envelope, field or combination. Context gives \msg{field} and \msg{reason}. & Correct the indicated field. An invalid envelope uses \msg{ERROR_RESP}. \\
-\bottomrule
+\begin{tabularx}{\textwidth}{|p{2.65cm}|Y|}
+\hline
+\labelrow{Dates and money} & Dates use \msg{YYYY-MM-DD}; timestamps use ISO-8601 (\msg{+07:00}). All monetary amounts are integer VND (no \msg{currency} field). \\
+\hline
+\labelrow{Seat and leg} & \msg{seatClass} is \msg{ECONOMY}, \msg{PREMIUM_ECONOMY}, or \msg{BUSINESS}. \msg{legType} is \msg{OUTBOUND} or \msg{RETURN}. \\
+\hline
+\labelrow{Passenger} & Object with \msg{fullName}, \msg{dob} (\msg{YYYY-MM-DD}), and \msg{idNumber}. \\
+\hline
+\labelrow{Flight / Offer} & \msg{flightId}, \msg{flightNo}, \msg{airline}, \msg{origin}, \msg{destination}, \msg{departAt}, \msg{arriveAt}, \msg{seatClass}, \msg{price}, \msg{seatsLeft}, \msg{status}. \\
+\hline
 \end{tabularx}
 \end{frame}
 
-\begin{frame}{Access and account errors}
-\footnotesize\renewcommand{\arraystretch}{1.06}
-\begin{tabularx}{\textwidth}{@{}lYY@{}}
-\toprule \labelrow{Code} & \labelrow{Trigger and error data} & \labelrow{Client action} \\
-\midrule
-\msg{E_NOT_AUTHENTICATED} & Protected command on an anonymous connection. Empty context. & Log in and resend. \\
-\addlinespace[1pt]
-\msg{E_FORBIDDEN} & Signed-in role lacks access. \msg{requiredRole} identifies the role. & Show the permission error. \\
-\addlinespace[1pt]
-\msg{E_ALREADY_LOGGED_IN} & Registration or login on an authenticated connection. Empty context. & Log out and reconnect to switch accounts. \\
-\addlinespace[1pt]
-\msg{E_BAD_CREDENTIALS} & Username or password mismatch. Empty context. & Prompt for credentials again. \\
-\addlinespace[1pt]
-\msg{E_USERNAME_TAKEN} & Username already registered. \msg{field} is username. & Choose a different username. \\
-\addlinespace[1pt]
-\msg{E_NOT_FOUND} & Resource is missing or belongs to another user. Context gives \msg{kind} and \msg{id}. & Refresh the list of accessible resources. \\
-\bottomrule
+\begin{frame}{Appendix: error codes (1/2)}
+\footnotesize\renewcommand{\arraystretch}{1.1}
+\begin{tabularx}{\textwidth}{|l|Y|Y|}
+\hline
+\labelrow{Code} & \labelrow{When returned} & \labelrow{Client action} \\
+\hline
+\msg{E_BAD_JSON} & Malformed JSON or invalid UTF-8 frame. & Fix message format and resend. \\
+\hline
+\msg{E_UNKNOWN_TYPE} & Unrecognized \msg{type} command. & Use a valid command name. \\
+\hline
+\msg{E_VALIDATION} & Missing or invalid request field. & Prompt user to fix the indicated \msg{field}. \\
+\hline
+\msg{E_NOT_AUTHENTICATED} & Protected command without valid \msg{sessionId}. & Log in first and retry. \\
+\hline
+\msg{E_FORBIDDEN} & Signed-in role lacks permission (e.g. non-admin). & Show permission denied message. \\
+\hline
 \end{tabularx}
 \end{frame}
 
-\begin{frame}{Availability, payment and booking errors}
-\footnotesize\renewcommand{\arraystretch}{1.06}
-\begin{tabularx}{\textwidth}{@{}lYY@{}}
-\toprule \labelrow{Code} & \labelrow{Trigger and error data} & \labelrow{Client action} \\
-\midrule
-\msg{E_FLIGHT_UNAVAILABLE} & Unusable flight. Context gives \msg{flightId} and \msg{status}. & Search again. \\
-\addlinespace[1pt]
-\msg{E_SEATS_UNAVAILABLE} & Too few seats for comparison, purchase or change. \msg{flightId}, \msg{requested}, \msg{seatsLeft}. & Choose an available flight. \\
-\addlinespace[1pt]
-\msg{E_INSUFFICIENT_BALANCE} & A purchase or itinerary change exceeds the available balance. Context gives \msg{required} and \msg{available}. & Select an affordable itinerary or retry after a balance change. \\
-\addlinespace[1pt]
-\msg{E_STATE_CONFLICT} & Current state disallows the action. Context gives \msg{currentStatus}. & Refresh the booking or flight. \\
-\addlinespace[1pt]
-\msg{E_CANCEL_NOT_ALLOWED} & Cancellation outside refund window. \msg{hoursToDeparture} gives the interval. & Keep the booking and display the policy. \\
-\bottomrule
-\end{tabularx}
-\end{frame}
-
-\begin{frame}{Change, concurrency and server errors}
-\footnotesize\renewcommand{\arraystretch}{1.06}
-\begin{tabularx}{\textwidth}{@{}lYY@{}}
-\toprule \labelrow{Code} & \labelrow{Trigger and error data} & \labelrow{Client action} \\
-\midrule
-\msg{E_CHANGE_NOT_ALLOWED} & Same flight, wrong route or class, or too late. Context gives \msg{reason}. & Select an eligible replacement. \\
-\addlinespace[1pt]
-\msg{E_QUOTE_EXPIRED} & Change quote reached expiry. Context gives \msg{quoteId}. & Request and confirm a fresh quote. \\
-\addlinespace[1pt]
-\msg{E_VERSION_CONFLICT} & Stale fare, version or quote. Context gives \msg{kind}, \msg{expected?}, \msg{actual?}. For FARE, amounts are VND. & Refresh the offer and confirm the new fare, or request a new change quote. \\
-\addlinespace[1pt]
-\msg{E_IDEMPOTENCY_CONFLICT} & Different payload for a used \msg{idempotencyKey}. Context echoes the key. & Inspect the original operation. Use a new key for a distinct intent. \\
-\addlinespace[1pt]
-\msg{E_INTERNAL} & Unexpected failure before commit. Transaction rolled back. Empty context. & Retry later with the same mutation key. \\
-\bottomrule
+\begin{frame}{Appendix: error codes (2/2)}
+\footnotesize\renewcommand{\arraystretch}{1.1}
+\begin{tabularx}{\textwidth}{|l|Y|Y|}
+\hline
+\labelrow{Code} & \labelrow{When returned} & \labelrow{Client action} \\
+\hline
+\msg{E_BAD_CREDENTIALS} & Username or password mismatch on \msg{LOGIN}. & Prompt for credentials again. \\
+\hline
+\msg{E_USERNAME_TAKEN} & Username already exists on \msg{REGISTER}. & Choose another username. \\
+\hline
+\msg{E_NOT_FOUND} & Flight or booking does not exist (or not owned). & Refresh list and retry. \\
+\hline
+\msg{E_SEATS_UNAVAILABLE} & Not enough seats in the requested class. & Choose another flight or class. \\
+\hline
+\msg{E_INSUFFICIENT_BALANCE} & Account balance is lower than required fare. & Select a cheaper flight or top up. \\
+\hline
+\msg{E_INTERNAL} & Unexpected server error. & Show error and retry later. \\
+\hline
 \end{tabularx}
 \end{frame}
 
