@@ -6,14 +6,22 @@
 \def\slideContentTopPadding{0cm}
 \def\hustHeaderHeight{1.05cm}
 \usepackage[blue,169]{beamerthemeHUST}
+\usetikzlibrary{arrows.meta,positioning,calc}
 \patchcmd{\husttitlepage}{Người thực hiện:}{Presented by}{}{}
 \setbeamerfont{frametitle}{size=\large}
 \newcommand{\msg}[1]{{\texttt{\detokenize{#1}}}}
 \newcommand{\labelrow}[1]{\textcolor{hustprimary}{\bfseries #1}}
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
-\newcommand{\contractrows}{\renewcommand{\arraystretch}{1.25}}
+\newcommand{\contractrows}{\renewcommand{\arraystretch}{1.2}}
+\tikzset{
+  archbox/.style={draw=hustprimary, thick, rounded corners=2pt, fill=blue!4, align=center, font=\footnotesize, inner sep=5pt, minimum height=0.85cm},
+  statebox/.style={draw=hustprimary, thick, rounded corners=4pt, fill=blue!4, align=center, font=\footnotesize, inner sep=5pt, minimum height=0.85cm},
+  arr/.style={-{Stealth[length=2.2mm]}, thick, draw=hustprimary},
+  darr/.style={-{Stealth[length=2.2mm]}, thick, dashed, draw=hustprimary},
+  lbl/.style={font=\footnotesize, fill=white, inner sep=1.5pt, align=center}
+}
 \title{Flight Ticket Booking}
-\subtitle{Message catalog and error handling}
+\subtitle{Application protocol and message design}
 \font\presenterfont="Arial" at 10pt\relax
 \author{\presenterfont Nguyễn Ngọc Minh Hiếu (20235933)\\Phạm Thanh Phong (20235987)}
 \institute{Network Programming \quad 25 November 2026}
@@ -28,44 +36,112 @@
 \useThinBar
 \setbeamertemplate{background canvas}{\includegraphics[width=\paperwidth,height=\paperheight]{hust-blue-169-content-hust-full.png}}
 \setbeamertemplate{background}{\drawHustPageNum}
-\begin{frame}{Booking lifecycle and system responsibilities}
-\small\contractrows
-\begin{tabularx}{\textwidth}{|p{2.65cm}|Y|}
+
+% Slide 2: Application introduction and scope
+\begin{frame}{Application introduction and scope}
+\footnotesize\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{|p{2.5cm}|Y|}
 \hline
-\labelrow{Customer} & Register and log in, search and compare flights, and book tickets using account balance. Can view, print, cancel, or change bookings. \\
+\labelrow{Overview} & Online flight search, comparison, and ticket booking application over custom TCP sockets. Flight inventory is mocked; all fares and balances use integer VND. \\
 \hline
-\labelrow{Server} & Listens over TCP, logs all requests and replies, manages mocked flight data, deducts balance on booking, and sends e-tickets via email. \\
+\labelrow{Customer} & Register and log in, search flights (route, dates, passenger count, seat class), compare airlines by price and flight time, pay via account balance, receive e-tickets by email, and view, cancel, change, or print tickets. \\
 \hline
-\labelrow{Administrator} & Updates flight status (delay, reschedule, or cancel). The server stores notifications and pushes them to online customers. \\
+\labelrow{Administrator} & Updates flight schedules (delay, reschedule, or cancel) to trigger stored and real-time customer notifications. \\
+\hline
+\labelrow{Requirement coverage} & Covers all 9 graded requirements (20 pts): TCP sockets (2), server message logging (1), register/login (2), flight search (2), comparison (2), booking \& balance payment (3), real email e-ticket (2), ticket management (3), and flight notifications (3). \\
 \hline
 \end{tabularx}
 \end{frame}
 
+% Slide 3: Client-server architecture and server logging
+\begin{frame}{Client--server architecture and server logging}
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+  \node[archbox, text width=2.8cm] (client) at (0,0) {\textbf{PC B: Clients}\\Customer \& Admin\\Socket TX / RX};
+  \node[archbox, text width=3.2cm] (server) at (5.7,0) {\textbf{PC A: Server}\\C / C++ / Java\\TCP socket handlers};
+  \node[archbox, text width=2.9cm] (db) at (11.2,0) {\textbf{Data Store}\\Users \& balances\\Flights \& bookings};
+  \node[archbox, text width=3.2cm] (log) at (5.7,-2.25) {\textbf{Message Logger}\\Logs RX \& TX frames\\(\msg{date}, \msg{type}, \msg{code})};
+  \node[archbox, text width=2.9cm] (smtp) at (11.2,-2.25) {\textbf{Email (SMTP)}\\Sends real e-ticket\\to login email};
+
+  \draw[arr,<->] (client) -- node[lbl,above]{TCP socket} node[lbl,below]{JSON lines} (server);
+  \draw[arr,<->] (server) -- node[lbl,above]{Read / Write} (db);
+  \draw[arr] (server) -- node[lbl,right=2pt]{Log RX/TX} (log);
+  \draw[arr] (server.south east) -- node[lbl,pos=0.5]{Payment OK} (smtp.north west);
+\end{tikzpicture}
+\vspace{4pt}
+\par\raggedright\footnotesize
+\labelrow{Architecture choice:} Pure client--server on two separate PCs over persistent TCP. Only the server holds authoritative flight seats, user balances, sessions, and message logs; clients never communicate peer-to-peer.
+\end{frame}
+
+% Slide 4: Connection and session state machine
+\begin{frame}{Protocol state machine: connection and session}
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+  \node[font=\footnotesize\bfseries, text=hustprimary] (start) at (-0.4,0) {Start};
+  \node[statebox, text width=2.3cm] (anon) at (2.0,0) {\textbf{Anonymous}\\(\msg{sessionId}: null)};
+  \node[statebox, text width=3.5cm] (cust) at (7.8,1.1) {\textbf{Authenticated USER}\\(Book, manage, inbox)};
+  \node[statebox, text width=3.5cm] (admin) at (7.8,-1.1) {\textbf{Authenticated ADMIN}\\(\msg{ADMIN_UPDATE_FLIGHT})};
+  \node[statebox, text width=2.0cm] (closed) at (12.4,0) {\textbf{Closed}\\(Socket EOF)};
+
+  \draw[arr] (start) -- node[lbl,above]{TCP} (anon);
+  \draw[arr] (anon.north east) -- node[lbl,above,yshift=2pt]{\msg{REGISTER} / \msg{LOGIN}} (cust.west);
+  \draw[arr] (anon.south east) -- node[lbl,below,yshift=-2pt]{\msg{LOGIN} [ADMIN]} (admin.west);
+  \draw[arr] (cust.east) -- node[lbl,above right,xshift=-2pt]{\msg{LOGOUT}} (closed.north west);
+  \draw[arr] (admin.east) -- node[lbl,below right,xshift=-2pt]{\msg{LOGOUT}} (closed.south west);
+  \draw[arr] (anon.south) to[out=-36,in=-144] node[lbl,below]{TCP disconnect} (closed.south);
+\end{tikzpicture}
+\vspace{2pt}
+\par\raggedright\footnotesize
+\labelrow{State rules:} \msg{SEARCH_FLIGHTS} and \msg{COMPARE_FLIGHTS} are allowed in \textbf{Anonymous}, \textbf{USER}, and \textbf{ADMIN}. Failed requests (\msg{E_...}) keep the current state. Online \textbf{USER} sessions also receive \msg{NOTIFY} pushes.
+\end{frame}
+
+% Slide 5: Booking lifecycle state machine
+\begin{frame}{Protocol state machine: booking lifecycle}
+\centering
+\vspace{4pt}
+\begin{tikzpicture}[x=1cm,y=1cm]
+  \node[font=\footnotesize\bfseries, text=hustprimary] (bstart) at (-0.4,0) {New};
+  \node[statebox, text width=2.9cm] (ticketed) at (3.4,0) {\textbf{TICKETED}\\Active e-ticket\\Printable \& changeable};
+  \node[statebox, text width=3.5cm] (cancelled) at (10.5,1.15) {\textbf{CANCELLED}\\Customer cancelled\\Fare refunded to balance};
+  \node[statebox, text width=3.5cm] (fcancelled) at (10.5,-1.15) {\textbf{FLIGHT\_CANCELLED}\\Airline cancelled flight\\Fare refunded + \msg{NOTIFY}};
+
+  \draw[arr] (bstart) -- node[lbl,above]{\msg{BOOK_FLIGHT}\\{[\msg{OK}]}} (ticketed);
+  \draw[arr] (ticketed.north west) .. controls +(-0.4,0.95) and +(0.4,0.95) .. node[lbl,above]{\msg{CHANGE_BOOKING} [\msg{OK}]} (ticketed.north);
+  \draw[arr] (ticketed.east) -- node[lbl,pos=0.48]{\msg{CANCEL_BOOKING}\\{[\msg{OK}]}} (cancelled.west);
+  \draw[arr] (ticketed.south east) -- node[lbl,pos=0.48]{\msg{ADMIN_UPDATE_FLIGHT}\\(\msg{CANCEL})} (fcancelled.west);
+\end{tikzpicture}
+\vspace{6pt}
+\par\raggedright\footnotesize
+\labelrow{Lifecycle rules:} Because payment uses the customer's stored VND balance directly during \msg{BOOK_FLIGHT}, there is no unpaid hold state. Delay and reschedule updates keep the booking in \textbf{TICKETED} and send \msg{NOTIFY}.
+\end{frame}
+
+% Slide 6: How to read a message contract
 \begin{frame}{How to read a message contract}
-\small\contractrows
-\begin{tabularx}{\textwidth}{|p{2.65cm}|Y|}
+\footnotesize\renewcommand{\arraystretch}{1.15}
+\begin{tabularx}{\textwidth}{|p{2.5cm}|Y|}
 \hline
-\labelrow{Request} & One UTF-8 JSON object per line over TCP. Required envelope fields are \msg{type} (uppercase command), \msg{id} (unique on this connection), \msg{sessionId} (session token, \msg{null} before sign-in), \msg{date} (ISO-8601 timestamp when sent) and \msg{data} (object). \\
+\labelrow{Request} & One UTF-8 JSON object per line (\msg{\n}) over TCP. Required envelope fields: \msg{type} (uppercase command), \msg{id} (unique per request), \msg{sessionId} (token, or \msg{null} before login), \msg{date} (ISO-8601 send timestamp), and \msg{data} (object). \\
 \hline
-\labelrow{Reply} & Append \msg{_RESP} to the command and echo \msg{id}, \msg{sessionId} and \msg{date}. Success sets \msg{code} = OK. Failure sets \msg{code} to an error code (\msg{E_...}), with a human-readable \msg{message} and context in \msg{data}. \\
+\labelrow{Reply} & Appends \msg{_RESP} to \msg{type} and echoes \msg{id}, \msg{sessionId}, and \msg{date}. Success sets \msg{code} = \msg{OK}. Failure sets \msg{code} = \msg{E_...}, adds human-readable \msg{message}, and puts error context in \msg{data}. \\
 \hline
-\labelrow{Push} & \msg{NOTIFY} uses a null ID. A push may arrive before a pending reply. Match replies by ID and dispatch pushes by type. \\
+\labelrow{Push} & Server-initiated \msg{NOTIFY} sets \msg{id} = \msg{null}, includes \msg{sessionId}, \msg{date}, and event payload in \msg{data}, and omits \msg{code}. Clients match replies by \msg{id} and dispatch pushes by \msg{type}; pushes receive no reply. \\
 \hline
-\labelrow{Field notation} & The following contracts list the fields inside \msg{data}. Fields marked ? are optional or conditional. An empty object is written \{\}. \\
+\labelrow{Field notation} & Contract tables list the fields inside \msg{data}. Fields ending in \msg{?} are optional or conditional; an empty payload is written \texttt{\{\}}. \\
 \hline
 \end{tabularx}
-
 \end{frame}
 
+% Slide 7: Message example: LOGIN
 \begin{frame}[fragile]{Message example: \small\msg{LOGIN}}
-\footnotesize\begin{tabular}{@{}p{0.44\textwidth}|p{0.51\textwidth}@{}}
+\footnotesize
+\begin{tabular}{|p{0.43\textwidth}|p{0.51\textwidth}|}
+\hline
 \labelrow{Client $\rightarrow$ Server (Request)} & \labelrow{Server $\rightarrow$ Client (Success / Failure)} \\
 \hline
 \begin{minipage}[t]{\linewidth}\footnotesize
 \begin{verbatim}
 {
-  "type": "LOGIN",
-  "id": "req-001",
+  "type": "LOGIN", "id": "req-001",
   "sessionId": null,
   "date": "2026-11-25T14:30:00+07:00",
   "data": {
@@ -74,20 +150,19 @@
   }
 }
 \end{verbatim}
-\vspace{4pt}
-\raggedright\footnotesize If credentials match, \msg{code} is \msg{OK} and \msg{sessionId} is assigned. Otherwise \msg{code} is \msg{E_BAD_CREDENTIALS}.
+\vspace{2pt}
+\raggedright Valid credentials return \msg{code}: \msg{OK} and a new \msg{sessionId}; invalid ones return \msg{E_BAD_CREDENTIALS}.
 \end{minipage}
 &
 \begin{minipage}[t]{\linewidth}\footnotesize
 \begin{verbatim}
 {
   "type": "LOGIN_RESP", "id": "req-001",
-  "sessionId": "sess-9f3a",
+  "sessionId": "sess-9f3a", "code": "OK",
   "date": "2026-11-25T14:30:00+07:00",
-  "code": "OK",
   "data": {
-    "userId": "u-101", "role": "USER",
-    "balance": 5000000, "unreadNotifications": 1
+    "userId": "u-101", "username": "hieu",
+    "role": "USER", "balance": 5000000
   }
 }
 {
@@ -95,14 +170,15 @@
   "sessionId": null,
   "date": "2026-11-25T14:30:00+07:00",
   "code": "E_BAD_CREDENTIALS",
-  "message": "Invalid credentials.",
-  "data": {}
+  "message": "Bad credentials.", "data": {}
 }
 \end{verbatim}
-\end{minipage}
+\end{minipage} \\
+\hline
 \end{tabular}
 \end{frame}
 
+% Slide 8: Account creation, sign-in and sign-out
 \begin{frame}{Account creation, sign-in and sign-out}
 \footnotesize\renewcommand{\arraystretch}{1.1}
 \begin{tabularx}{\textwidth}{|p{1.75cm}|Y|Y|Y|}
@@ -113,81 +189,92 @@
 \hline
 \labelrow{Request} & \msg{username}, \msg{password}, \msg{email} & \msg{username}, \msg{password} & \texttt{\{\}} \\
 \hline
-\labelrow{Success} & \msg{OK}: \msg{userId}, \msg{username}, \msg{role}, \msg{balance} & \msg{OK}: \msg{userId}, \msg{username}, \msg{role} (USER adds \msg{balance}, \msg{unreadNotifications}) & \msg{OK}: \texttt{\{\}} \\
+\labelrow{Success} & \msg{OK}: \msg{userId}, \msg{username}, \msg{role}, \msg{balance} & \msg{OK}: \msg{userId}, \msg{username}, \msg{role} (USER adds \msg{balance}) & \msg{OK}: \texttt{\{\}} \\
 \hline
 \labelrow{Errors} & \msg{E_VALIDATION}, \msg{E_USERNAME_TAKEN}, \msg{E_ALREADY_LOGGED_IN} & \msg{E_BAD_CREDENTIALS}, \msg{E_ALREADY_LOGGED_IN} & \msg{E_NOT_AUTHENTICATED} \\
 \hline
-\labelrow{Notes} & Creates customer account and opens session. & Returns new \msg{sessionId} in reply envelope. & Server closes the connection after sending reply. \\
+\labelrow{Notes} & Creates customer account with registered email and opens session. & Verifies credentials and returns new \msg{sessionId} in envelope. & Ends session and closes the TCP connection after reply. \\
 \hline
 \end{tabularx}
 \end{frame}
 
+% Slide 9: Login flow
 \begin{frame}{Login flow: authenticate and start session}
-\centering\begin{tikzpicture}[x=1cm,y=1.15cm,font=\footnotesize]
-\foreach \x/\name in {0/Client,5.2/Booking server,10.4/Database} {
+\centering
+\begin{tikzpicture}[x=1cm,y=1.08cm,font=\footnotesize]
+\foreach \x/\name in {0/Client,6.0/Booking server,12.0/Database} {
   \node[text=hustprimary,font=\small\bfseries] at (\x,0) {\name};
-  \draw[gray,dashed] (\x,-0.24) -- (\x,-4.0);
+  \draw[gray,dashed] (\x,-0.25) -- (\x,-3.95);
 }
-\draw[->,thick] (0,-0.85) -- node[above]{\msg{LOGIN} (\msg{username}, \msg{password}, \msg{sessionId}: null)} (5.2,-0.85);
-\draw[->,thick] (5.2,-1.55) -- node[above]{Verify credentials and load profile} (10.4,-1.55);
-\draw[->,dashed] (10.4,-2.25) -- node[above]{User record, role, balance, unread count} (5.2,-2.25);
-\node[align=center,fill=white] at (5.2,-2.90) {Create \msg{sessionId}; bind role to connection};
-\draw[->,dashed] (5.2,-3.65) -- node[above]{\msg{LOGIN_RESP} (\msg{code}: OK, \msg{sessionId})} (0,-3.65);
+\draw[arr] (0,-0.80) -- node[lbl,above]{\msg{LOGIN} (\msg{username}, \msg{password}, \msg{sessionId}: null)} (6.0,-0.80);
+\draw[arr] (6.0,-1.50) -- node[lbl,above]{Verify credentials and load account} (12.0,-1.50);
+\draw[darr] (12.0,-2.20) -- node[lbl,above]{User record (\msg{userId}, \msg{role}, \msg{balance}, \msg{email})} (6.0,-2.20);
+\node[lbl, draw=hustprimary!40, rounded corners=2pt] at (6.0,-2.88) {Generate \msg{sessionId}; bind role to connection};
+\draw[darr] (6.0,-3.60) -- node[lbl,above]{\msg{LOGIN_RESP} (\msg{code}: OK, \msg{sessionId})} (0,-3.60);
 \end{tikzpicture}
-\par\raggedright\footnotesize\labelrow{If authentication fails} The server returns \msg{E_BAD_CREDENTIALS} with \msg{sessionId} = null and keeps the connection anonymous.
+\vspace{3pt}
+\par\raggedright\footnotesize\labelrow{If authentication fails:} The server logs the attempt, returns \msg{E_BAD_CREDENTIALS} with \msg{sessionId} = \msg{null}, and keeps the connection in the \textbf{Anonymous} state.
 \end{frame}
 
+% Slide 10: Flight discovery and comparison
 \begin{frame}{Flight discovery and comparison}
-\footnotesize\renewcommand{\arraystretch}{1.12}
-\begin{tabularx}{\textwidth}{|p{1.9cm}|Y|Y|}
+\footnotesize\renewcommand{\arraystretch}{1.08}
+\begin{tabularx}{\textwidth}{|p{1.85cm}|Y|Y|}
 \hline
  & \msg{SEARCH_FLIGHTS} & \msg{COMPARE_FLIGHTS} \\
 \hline
 \labelrow{Role / Auth} & Any (\msg{sessionId} optional) & Any (\msg{sessionId} optional) \\
 \hline
-\labelrow{Request} & \msg{origin}, \msg{destination}, \msg{departDate}, \msg{seatClass?}, \msg{returnDate?} & \msg{flightIds}, \msg{seatClass?} \\
+\labelrow{Request} & \msg{origin}, \msg{destination}, \msg{departDate}, \msg{passengers}, \msg{seatClass?}, \msg{returnDate?} & \msg{flightIds}, \msg{seatClass?} \\
 \hline
-\labelrow{Success} & \msg{OK}: \msg{seatClass}, \msg{seatsLeft}, \msg{price}, \msg{outbound}, \msg{inbound} & \msg{OK}: \msg{rows}, \msg{cheapestFlightId}, \msg{fastestFlightId} \\
+\labelrow{Success} & \msg{OK}: \msg{outbound}, \msg{inbound?} (lists of \msg{Flight} items with \msg{seatClass}, \msg{seatsLeft}, \msg{price}, \msg{durationMin}) & \msg{OK}: \msg{rows}, \msg{cheapestFlightId}, \msg{fastestFlightId} (\msg{rows} compares airline, \msg{price}, \msg{departAt}, \msg{arriveAt}, \msg{durationMin}) \\
 \hline
-\labelrow{Errors} & \msg{E_VALIDATION} & \msg{E_VALIDATION}, \msg{E_SEATS_UNAVAILABLE}, \msg{E_NOT_FOUND} \\
+\labelrow{Errors} & \msg{E_VALIDATION} & \msg{E_VALIDATION}, \msg{E_NOT_FOUND} \\
 \hline
-\labelrow{Notes} & An empty result is a valid \msg{OK} response. & Select 2--5 distinct flights on the same route and date. \\
+\labelrow{Notes} & \msg{passengers} is an integer count filtering flights with \msg{seatsLeft >= passengers}. Empty list is \msg{OK}. Admins also use \msg{SEARCH_FLIGHTS} to find \msg{flightId} for updates. & Compares 2--5 distinct flights across airlines by ticket price and flight time. \\
 \hline
 \end{tabularx}
 \end{frame}
 
+% Slide 11: Direct purchase: BOOK_FLIGHT
 \begin{frame}{Direct purchase: \small\msg{BOOK_FLIGHT}}
 \footnotesize\renewcommand{\arraystretch}{1.12}
 \begin{tabularx}{\textwidth}{|p{2.2cm}|Y|}
 \hline
 \labelrow{Role / Auth} & Customer (\msg{sessionId} required) \\
 \hline
-\labelrow{Request} & \msg{outboundFlightId}, \msg{returnFlightId?}, \msg{seatClass}, \msg{passengers} \\
+\labelrow{Request} & \msg{outboundFlightId}, \msg{returnFlightId?}, \msg{seatClass}, \msg{passengers} (array of \msg{Passenger} objects) \\
 \hline
 \labelrow{Success} & \msg{OK}: \msg{bookingCode}, \msg{status} = \msg{TICKETED}, \msg{paid}, \msg{balanceAfter}, \msg{eTicketCode}, \msg{legs} \\
 \hline
 \labelrow{Errors} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND}, \msg{E_SEATS_UNAVAILABLE}, \msg{E_INSUFFICIENT_BALANCE} \\
 \hline
-\labelrow{Notes} & Server checks seats and balance, deducts fare, and sends the e-ticket to the user's email. \\
+\labelrow{Notes} & Server checks \msg{seatsLeft} and VND balance, deducts fare, saves booking, and on payment success emails \msg{eTicketCode} to the email of the logged-in account. \\
 \hline
 \end{tabularx}
 \end{frame}
 
+% Slide 12: Booking sequence
 \begin{frame}{Booking sequence: verify, pay and issue}
-\centering\begin{tikzpicture}[x=1cm,y=1.15cm,font=\footnotesize]
-\foreach \x/\name in {0/Customer client,5.2/Booking server,10.4/Database} {
+\centering
+\begin{tikzpicture}[x=1cm,y=1.08cm,font=\footnotesize]
+\foreach \x/\name in {0/Customer client,6.0/Booking server,12.0/Database} {
   \node[text=hustprimary,font=\small\bfseries] at (\x,0) {\name};
-  \draw[gray,dashed] (\x,-0.24) -- (\x,-4.0);
+  \draw[gray,dashed] (\x,-0.25) -- (\x,-3.90);
 }
-\draw[->,thick] (0,-0.85) -- node[above]{\msg{BOOK_FLIGHT} (flights, class, passengers)} (5.2,-0.85);
-\draw[->,thick] (5.2,-1.55) -- node[above]{Check seat availability and user balance} (10.4,-1.55);
-\draw[->,thick] (5.2,-2.35) -- node[above]{Deduct balance, update seats, save booking} (10.4,-2.35);
-\draw[->,dashed] (10.4,-3.05) -- node[above]{Booking saved} (5.2,-3.05);
-\draw[->,dashed] (5.2,-3.70) -- node[above]{\msg{BOOK_FLIGHT_RESP} (\msg{code}: OK, \msg{bookingCode}, \msg{eTicketCode})} (0,-3.70);
+\draw[arr] (0,-0.80) -- node[lbl,above]{\msg{BOOK_FLIGHT} (flights, \msg{seatClass}, \msg{passengers})} (6.0,-0.80);
+\draw[arr] (6.0,-1.50) -- node[lbl,above]{Check seat availability and user VND balance} (12.0,-1.50);
+\draw[arr] (6.0,-2.25) -- node[lbl,above]{Deduct balance, decrement seats, save booking} (12.0,-2.25);
+\draw[darr] (12.0,-2.95) -- node[lbl,above]{Booking \& \msg{eTicketCode} saved} (6.0,-2.95);
+\draw[darr] (6.0,-3.65) -- node[lbl,above]{\msg{BOOK_FLIGHT_RESP} (\msg{code}: OK, \msg{bookingCode}, \msg{eTicketCode})} (0,-3.65);
 \end{tikzpicture}
-\par\raggedright\footnotesize\labelrow{On failure} If seats or balance are insufficient, no changes are saved and the server returns \msg{E_SEATS_UNAVAILABLE} or \msg{E_INSUFFICIENT_BALANCE}.
+\vspace{3pt}
+\par\raggedright\footnotesize
+\labelrow{On payment success:} Server sends the electronic ticket (\msg{eTicketCode}) via email to the email registered with the user's login account.\\[2pt]
+\labelrow{On failure:} No seats or balance are deducted; server returns \msg{E_SEATS_UNAVAILABLE} or \msg{E_INSUFFICIENT_BALANCE}.
 \end{frame}
 
+% Slide 13: Booking list and detail
 \begin{frame}{Booking list and detail}
 \footnotesize\renewcommand{\arraystretch}{1.12}
 \begin{tabularx}{\textwidth}{|p{1.9cm}|Y|Y|}
@@ -207,6 +294,7 @@
 \end{tabularx}
 \end{frame}
 
+% Slide 14: Cancellation, itinerary change and printing
 \begin{frame}{Cancellation, itinerary change and printing}
 \footnotesize\renewcommand{\arraystretch}{1.08}
 \begin{tabularx}{\textwidth}{|p{1.75cm}|Y|Y|Y|}
@@ -221,53 +309,55 @@
 \hline
 \labelrow{Errors} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND} & \msg{E_NOT_AUTHENTICATED}, \msg{E_NOT_FOUND}, \msg{E_SEATS_UNAVAILABLE}, \msg{E_INSUFFICIENT_BALANCE} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND} \\
 \hline
-\labelrow{Notes} & Cancels booking and refunds fare to balance. & Client shows a confirmation box before sending. & Returns printable ticket text lines. \\
+\labelrow{Notes} & Cancels booking and refunds fare to balance. & Client confirms via dialog box before sending. & Returns printable ticket text lines. \\
 \hline
 \end{tabularx}
 \end{frame}
 
+% Slide 15: Flight administration and notifications
 \begin{frame}{Flight administration and notifications}
-\footnotesize\renewcommand{\arraystretch}{1.08}
-\begin{tabularx}{\textwidth}{|p{1.75cm}|Y|Y|Y|}
+\footnotesize\renewcommand{\arraystretch}{0.96}
+\begin{tabularx}{\textwidth}{|p{1.45cm}|Y|Y|p{3.2cm}|}
 \hline
  & \msg{ADMIN_UPDATE_FLIGHT} & \msg{NOTIFY} & \msg{GET_NOTIFICATIONS} \\
 \hline
-\labelrow{Role / Auth} & Admin (\msg{sessionId} required) & Server push (online Customer) & Customer (\msg{sessionId} required) \\
+\labelrow{Role/Auth} & Admin (\msg{sessionId} required) & Server push (online USER) & Customer (\msg{sessionId}) \\
 \hline
-\labelrow{Request} & \msg{flightId}, \msg{action}, \msg{reason?} & --- (server push; \msg{id}: null) & \msg{unreadOnly?} \\
+\labelrow{Request} & \msg{flightId}, \msg{action}, \msg{reason?}, \msg{delayMinutes?}, \msg{newDepartAt?}, \msg{newArriveAt?} & --- (push; \msg{id}: null) & \texttt{\{\}} \\
 \hline
-\labelrow{Success} & \msg{OK}: \msg{flight}, \msg{affectedBookings} & Push: \msg{kind}, \msg{bookingCode}, \msg{flightNo}, \msg{message}, \msg{createdAt} & \msg{OK}: \msg{notifications} \\
+\labelrow{Success} & \msg{OK}: \msg{flight}, \msg{affectedBookings} & Push: \msg{kind}, \msg{bookingCode}, \msg{flightNo}, \msg{message}, \msg{delayMinutes?}, \msg{newDepartAt?}, \msg{newArriveAt?} & \msg{OK}: \msg{notifications} \\
 \hline
-\labelrow{Errors} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND}, \msg{E_VALIDATION} & --- (push receives no reply) & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN} \\
+\labelrow{Errors} & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN}, \msg{E_NOT_FOUND}, \msg{E_VALIDATION} & --- (no reply) & \msg{E_NOT_AUTHENTICATED}, \msg{E_FORBIDDEN} \\
 \hline
-\labelrow{Notes} & \msg{DELAY} adds \msg{delayMinutes}; \msg{RESCHEDULE} adds \msg{newDepartAt}, \msg{newArriveAt}; \msg{CANCEL} has none. & Pushed to online affected customers on flight update. & Returns stored notifications for offline/reconnected users. \\
+\labelrow{Notes} & \msg{DELAY}, \msg{RESCHEDULE}, or \msg{CANCEL} (\msg{flightId} via \msg{SEARCH_FLIGHTS}). & Pushed to online affected users; timestamp in \msg{date}. & Returns stored notifications. \\
 \hline
 \end{tabularx}
 \end{frame}
 
-\appendix
-\begin{frame}{Appendix: shared data types}
-\small\contractrows
+% Slide 16: Shared data types
+\begin{frame}{Shared data types}
+\footnotesize\renewcommand{\arraystretch}{1.15}
 \begin{tabularx}{\textwidth}{|p{2.65cm}|Y|}
 \hline
 \labelrow{Dates and money} & Dates use \msg{YYYY-MM-DD}; timestamps use ISO-8601 (\msg{+07:00}). All monetary amounts are integer VND (no \msg{currency} field). \\
 \hline
 \labelrow{Seat and leg} & \msg{seatClass} is \msg{ECONOMY}, \msg{PREMIUM_ECONOMY}, or \msg{BUSINESS}. \msg{legType} is \msg{OUTBOUND} or \msg{RETURN}. \\
 \hline
-\labelrow{Passenger} & Object with \msg{fullName}, \msg{dob} (\msg{YYYY-MM-DD}), and \msg{idNumber}. \\
+\labelrow{Passengers} & In \msg{SEARCH_FLIGHTS}, \msg{passengers} is a positive integer count used to filter seat availability. In \msg{BOOK_FLIGHT} and \msg{GET_BOOKING}, \msg{passengers} is an array of objects with \msg{fullName}, \msg{dob} (\msg{YYYY-MM-DD}), and \msg{idNumber}. \\
 \hline
-\labelrow{Flight / Offer} & \msg{flightId}, \msg{flightNo}, \msg{airline}, \msg{origin}, \msg{destination}, \msg{departAt}, \msg{arriveAt}, \msg{seatClass}, \msg{price}, \msg{seatsLeft}, \msg{status}. \\
+\labelrow{Flight} & \msg{flightId}, \msg{flightNo}, \msg{airline}, \msg{origin}, \msg{destination}, \msg{departAt}, \msg{arriveAt}, \msg{durationMin}, \msg{seatClass}, \msg{price}, \msg{seatsLeft}, \msg{status}. \\
 \hline
 \end{tabularx}
 \end{frame}
 
-\begin{frame}{Appendix: error codes (1/2)}
+% Slide 17: Error codes (1/2)
+\begin{frame}{Error codes: protocol and access (1/2)}
 \footnotesize\renewcommand{\arraystretch}{1.1}
 \begin{tabularx}{\textwidth}{|l|Y|Y|}
 \hline
 \labelrow{Code} & \labelrow{When returned} & \labelrow{Client action} \\
 \hline
-\msg{E_BAD_JSON} & Malformed JSON or invalid UTF-8 frame. & Fix message format and resend. \\
+\msg{E_BAD_JSON} & Malformed JSON or invalid UTF-8 line. & Fix message format and resend. \\
 \hline
 \msg{E_UNKNOWN_TYPE} & Unrecognized \msg{type} command. & Use a valid command name. \\
 \hline
@@ -277,10 +367,13 @@
 \hline
 \msg{E_FORBIDDEN} & Signed-in role lacks permission (e.g. non-admin). & Show permission denied message. \\
 \hline
+\msg{E_ALREADY_LOGGED_IN} & \msg{REGISTER} or \msg{LOGIN} sent on an active session. & Log out before switching accounts. \\
+\hline
 \end{tabularx}
 \end{frame}
 
-\begin{frame}{Appendix: error codes (2/2)}
+% Slide 18: Error codes (2/2)
+\begin{frame}{Error codes: booking and server (2/2)}
 \footnotesize\renewcommand{\arraystretch}{1.1}
 \begin{tabularx}{\textwidth}{|l|Y|Y|}
 \hline
